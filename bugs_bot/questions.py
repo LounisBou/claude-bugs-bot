@@ -84,6 +84,6 @@ def asks(store: Store) -> list[str]:
     for path in sorted(store.people.glob("*.json")):
         card = load_person(store, path.stem) or {}
         pending = [q["report"] for q in card.get("questions", []) if q["report"] in askable]
-        if pending and _awaited(reports, card_key(card.get("author_id"), card.get("name") or ""), None) is None:
+        if pending and _awaited(reports, path.stem, None) is None:
             found.append(pending[0])
     return found

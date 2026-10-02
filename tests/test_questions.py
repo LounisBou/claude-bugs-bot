@@ -234,6 +234,40 @@ def test_an_escalated_wait_lets_the_next_question_be_posted(escalated, run, laur
     assert len(tg.sent) == 1 and card(laura)["questions"] == []
 
 
+# -- a person without user id: their card, by its key -------------------------------------------
+
+
+@pytest.fixture
+def nameless(run, bound) -> Path:
+    """Two reports of « Laura Martin », no user id recorded; asked about the first, the second queued; card name lost."""
+    write_report(bound, 5, author="Laura Martin", text="la liste saute")
+    write_report(bound, 6, author="Laura Martin", text="le bouton Lecture ne répond pas")
+    assert run("reply", FIRST, "Tu es sur quel iPhone ?", "--awaits", now=BASE_DATE) == 0
+    assert run("reply", SECOND, "Il répond au deuxième appui ?", "--awaits", now=BASE_DATE + 10) == 0
+    path = bound / "people" / "name-laura-martin.json"
+    path.write_text(json.dumps(json.loads(path.read_text()) | {"name": None}))
+    return bound
+
+
+def test_a_person_without_user_id_is_not_asked_while_they_owe_an_answer(nameless, run, capsys):
+    assert f"ask {SECOND}" not in wait_lines(run, capsys)
+
+
+def test_the_guard_holds_for_a_person_without_user_id(nameless, run):
+    tg = FakeTelegram()
+
+    assert run("reply", SECOND, "Le bouton répond ?", "--awaits", transport=tg, now=BASE_DATE + 20) == 0
+
+    assert tg.sent == []
+
+
+def test_a_person_without_user_id_is_asked_once_free(nameless, run, capsys):
+    tg = FakeTelegram([person_message(10, 100, user_id=70, name="Laura Martin", date=int(BASE_DATE + 60), text="iPhone SE")])
+    assert run("pull", transport=tg, now=BASE_DATE + 61) == 0
+
+    assert wait_lines(run, capsys).count(f"ask {SECOND}") == 1
+
+
 # -- the agent sees the queue, and keeps to one question ----------------------------------------
 
 
