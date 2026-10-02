@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from bugs_bot.doctor import LAUNCHER_TEXT, install_launcher
+from bugs_bot.errors import BugsError
 
 
 @pytest.fixture
@@ -50,13 +51,78 @@ def test_install_writes_an_executable_file_named_bugs_bot(tmp_path):
     assert stat.S_IMODE(path.stat().st_mode) == 0o755
 
 
-def test_install_twice_replaces_a_stale_launcher(tmp_path):
+def test_install_twice_replaces_an_older_launcher(tmp_path):
     path = install_launcher(tmp_path)
-    path.write_text("#!/bin/sh\necho old\n")
+    older = LAUNCHER_TEXT.replace("exec python3", "exec python")
+    assert older != LAUNCHER_TEXT
+    path.write_text(older)
 
     install_launcher(tmp_path)
 
     assert path.read_text() == LAUNCHER_TEXT
+    assert stat.S_IMODE(path.stat().st_mode) == 0o755
+
+
+def test_install_replaces_a_symlink_and_leaves_its_destination_alone(tmp_path):
+    destination = tmp_path / "elsewhere" / "bugs-bot"
+    destination.parent.mkdir()
+    install_launcher(destination.parent)
+    destination.write_text(LAUNCHER_TEXT + "# a launcher the operator keeps there\n")
+    kept = (destination.read_text(), destination.stat().st_mtime_ns)
+    target_dir = tmp_path / "bin"
+    target_dir.mkdir()
+    (target_dir / "bugs-bot").symlink_to(destination)
+
+    path = install_launcher(target_dir)
+
+    assert not path.is_symlink() and path.read_text() == LAUNCHER_TEXT
+    assert (destination.read_text(), destination.stat().st_mtime_ns) == kept
+
+
+def test_install_refuses_a_foreign_file_and_leaves_it_untouched(tmp_path):
+    tmp_path = tmp_path / "bin"
+    tmp_path.mkdir()
+    foreign = tmp_path / "bugs-bot"
+    foreign.write_text("#!/bin/sh\necho mine\n")
+    foreign.chmod(0o700)
+
+    with pytest.raises(BugsError, match=str(foreign)):
+        install_launcher(tmp_path)
+
+    assert foreign.read_text() == "#!/bin/sh\necho mine\n" and stat.S_IMODE(foreign.stat().st_mode) == 0o700
+    assert [p.name for p in tmp_path.iterdir()] == ["bugs-bot"]  # no temporary file left
+
+
+def test_install_refuses_a_symlink_to_a_foreign_file(tmp_path):
+    foreign = tmp_path / "mine"
+    foreign.write_text("#!/bin/sh\necho mine\n")
+    (tmp_path / "bugs-bot").symlink_to(foreign)
+
+    with pytest.raises(BugsError, match="bugs-bot"):
+        install_launcher(tmp_path)
+
+    assert (tmp_path / "bugs-bot").is_symlink() and foreign.read_text() == "#!/bin/sh\necho mine\n"
+
+
+def test_install_never_leaves_a_half_written_launcher(tmp_path, monkeypatch):
+    tmp_path = tmp_path / "bin"
+    path = install_launcher(tmp_path)
+    older = LAUNCHER_TEXT + "# older\n"
+    path.write_text(older)
+
+    def refuse(*_):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    with pytest.raises(OSError):
+        install_launcher(tmp_path)
+
+    assert path.read_text() == older
+    assert [p.name for p in tmp_path.iterdir()] == ["bugs-bot"]
+
+
+def test_the_launcher_text_carries_the_marker_that_makes_it_replaceable():
+    assert LAUNCHER_TEXT.startswith("#!/bin/sh\n#")
 
 
 def test_the_newest_version_runs_not_the_lexically_last(launcher, claude_dir):

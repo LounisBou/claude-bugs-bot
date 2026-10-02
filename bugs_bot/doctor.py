@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,7 +26,8 @@ SETTINGS_FILES = ("settings.json", "settings.local.json")
 # What every session runs as ``bugs-bot``: the newest installed version of the plugin's CLI. The newest
 # directory is chosen first and only then checked for its CLI, so a half-removed version is refused
 # instead of letting an older one run silently. ``sort -V`` orders 0.10.0 after 0.2.0 (BSD sort on macOS has it).
-LAUNCHER_TEXT = """#!/bin/sh
+LAUNCHER_MARKER = "# bugs-bot launcher: installed by `bugs-bot doctor --install-launcher`"
+LAUNCHER_TEXT = "#!/bin/sh\n" + LAUNCHER_MARKER + """
 d=$(ls -d "${BUGS_BOT_CLAUDE_DIR:-$HOME/.claude}"/plugins/cache/lounisbou/bugs-bot/*/ 2>/dev/null | sort -V | tail -1)
 [ -n "$d" ] && [ -f "${d}bin/bugs-bot" ] || { echo "bugs-bot: no installed version found — run /bugs-bot:doctor" >&2; exit 127; }
 exec python3 "${d}bin/bugs-bot" "$@"
@@ -63,11 +65,32 @@ def pull_processes(ps_output: str) -> list[int]:
 
 
 def install_launcher(target_dir: Path) -> Path:
-    """Write ``target_dir/bugs-bot`` (mode 0755), replacing any older text; return its path."""
+    """Write ``target_dir/bugs-bot`` (mode 0755), replacing an older launcher; return its path.
+
+    The new text goes to a temporary file in the same directory, then ``os.replace`` swaps it in: a
+    symlink at the target is replaced, never written through, and no reader sees a half-written file.
+
+    Raises:
+        BugsError: If the target exists and is not a bugs-bot launcher (it is left untouched).
+    """
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / "bugs-bot"
-    path.write_text(LAUNCHER_TEXT)
-    path.chmod(0o755)
+    if path.is_symlink() or path.exists():
+        try:
+            current = path.read_text()
+        except (OSError, ValueError):
+            current = ""
+        if LAUNCHER_MARKER not in current:
+            raise BugsError(f"{path} exists and is not a bugs-bot launcher: move it away, then install again")
+    fd, tmp = tempfile.mkstemp(dir=target_dir, prefix=".bugs-bot.")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(LAUNCHER_TEXT)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
     return path
 
 
