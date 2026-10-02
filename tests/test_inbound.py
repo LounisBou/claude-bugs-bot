@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
+from conftest import register
+from fake_channel import FakeChannel, inbound
+from fake_channel import author as fake_author
+from fake_channel import batch as fake_batch
 from samples import BASE_DATE, GROUP_ID, OTHER_GROUP_ID, TOKEN, FakeTelegram, message
 
+from bugs_bot import people, pull
 from bugs_bot.channel import Attachment, Author, Batch, InboundMessage, mask
 from bugs_bot.channels import channel_for, token_problem
 from bugs_bot.errors import BugsError
+from bugs_bot.init import discover_groups
+from bugs_bot.project import PROJECT_FILE
 from bugs_bot.store import Machine
 from bugs_bot.telegram import TelegramChannel
 
+FAMILY_ID = -1007777777777
 OLD_ID = -555
 PROMOTED_ID = -1005555555555
 IZNO = Author(id=42, username="izno_op", name="izno_op", language=None, is_bot=False)
@@ -275,3 +285,137 @@ def test_init_with_a_refused_api_root_fails_instead_of_going_without_a_channel(e
     assert cli.main(["init", "--repo", str(tmp_path), "--project", "demo", "--agent-title", "A"], transport=FakeTelegram(), env=bad) == 1
 
     assert "BUGS_BOT_API_ROOT must be" in capsys.readouterr().err
+
+
+# -- Pull, init and backfill through a fake channel (no transport) ------------------------------
+
+
+def test_pull_routes_two_projects_and_notes_an_unregistered_chat(tmp_path, bugs_home, capsys):
+    register(bugs_home, tmp_path / "repo-demo", "demo", GROUP_ID, "Demo Bugs")
+    register(bugs_home, tmp_path / "repo-other", "other", OTHER_GROUP_ID, "Other Bugs")
+    zoe = fake_author(77, None, "Zoé", language="fr")
+    channel = FakeChannel(
+        fake_batch(
+            inbound(GROUP_ID, 100, "ça plante"),
+            inbound(OTHER_GROUP_ID, 200, "", author=zoe, attachments=[Attachment("f1", ".png")]),
+            inbound(FAMILY_ID, 300, "coucou"),
+            cursor={"offset": 31},
+        )
+    )
+    machine = Machine(bugs_home)
+
+    pull.cmd_pull(channel, machine, BASE_DATE + 60)
+
+    assert channel.polls == [(None, [GROUP_ID, OTHER_GROUP_ID], 0)]
+    [demo] = machine.project_store("demo").reports()
+    [other] = machine.project_store("other").reports()
+    assert demo[2]["text"] == "ça plante" and demo[2]["chat_id"] == GROUP_ID
+    assert other[2]["author"] == "Zoé" and other[2]["author_id"] == 77 and other[2]["author_username"] is None
+    assert other[2]["images"] == ["1.png"] and (other[1] / "1.png").read_bytes() == b"bytes of f1"
+    assert list(machine.unregistered()) == [FAMILY_ID]
+    assert machine.load_cursor("telegram") == {"offset": 31}
+    assert [c[1:] for c in channel.of("react")] == [(GROUP_ID, 100, "\U0001f440"), (OTHER_GROUP_ID, 200, "\U0001f440")]
+    assert f"unregistered chat {FAMILY_ID} 'chat {FAMILY_ID}' dropped" in capsys.readouterr().err
+
+
+def test_pull_gives_the_saved_cursor_back_to_the_channel(tmp_path, bugs_home):
+    register(bugs_home, tmp_path / "repo-demo", "demo", GROUP_ID)
+    machine = Machine(bugs_home)
+    machine.save_cursor("telegram", {"offset": 12})
+    channel = FakeChannel()
+
+    pull.cmd_pull(channel, machine, BASE_DATE)
+
+    assert channel.polls == [({"offset": 12}, [GROUP_ID], 0)]
+    assert machine.load_cursor("telegram") == {"offset": 12}
+
+
+def test_an_empty_first_pull_writes_no_cursor(bugs_home):
+    pull.cmd_pull(FakeChannel(), Machine(bugs_home), BASE_DATE)
+
+    assert not (bugs_home / "state.json").exists()
+
+
+def test_a_failed_download_keeps_the_cursor_and_the_other_project_is_written_once(tmp_path, bugs_home, capsys):
+    register(bugs_home, tmp_path / "repo-demo", "demo", GROUP_ID)
+    register(bugs_home, tmp_path / "repo-other", "other", OTHER_GROUP_ID)
+    machine = Machine(bugs_home)
+    machine.save_cursor("telegram", {"offset": 5})
+    replayed = fake_batch(
+        inbound(GROUP_ID, 100, "", attachments=[Attachment("broken", ".jpg")]),
+        inbound(OTHER_GROUP_ID, 200, "fine"),
+        cursor={"offset": 9},
+    )
+    channel = FakeChannel(replayed, replayed)
+    channel.fail_files.add("broken")
+
+    with pytest.raises(BugsError, match="broken"):
+        pull.cmd_pull(channel, machine, BASE_DATE)
+
+    assert machine.load_cursor("telegram") == {"offset": 5}
+    assert machine.project_store("demo").reports() == []
+    assert not list((bugs_home / "demo" / "inbox").iterdir())  # the temp directory is gone too
+    assert len(machine.project_store("other").reports()) == 1
+
+    channel.fail_files.clear()
+    pull.cmd_pull(channel, machine, BASE_DATE)
+
+    assert channel.polls[1][0] == {"offset": 5}
+    assert len(machine.project_store("demo").reports()) == 1
+    assert len(machine.project_store("other").reports()) == 1
+    assert machine.load_cursor("telegram") == {"offset": 9}
+
+
+def test_a_migration_rebinds_the_project_and_its_old_messages_follow(tmp_path, bugs_home):
+    repo = register(bugs_home, tmp_path / "repo-demo", "demo", -555)
+    channel = FakeChannel(
+        fake_batch(inbound(-555, 1, "avant"), chats={}, migrations={-555: GROUP_ID}, cursor={"offset": 3})
+    )
+    machine = Machine(bugs_home)
+
+    pull.cmd_pull(channel, machine, BASE_DATE)
+
+    assert set(machine.registry.entries()) == {GROUP_ID}
+    assert json.loads((repo / PROJECT_FILE).read_text())["group"]["chat_id"] == GROUP_ID
+    [report] = machine.project_store("demo").reports()
+    assert report[2]["chat_id"] == -555  # recorded in the chat it was sent in
+
+
+def test_init_discovers_a_group_from_the_batch_and_never_saves_the_cursor(bugs_home):
+    machine = Machine(bugs_home)
+    machine.save_cursor("telegram", {"offset": 4})
+    channel = FakeChannel(fake_batch(inbound(GROUP_ID, 1, "x"), cursor={"offset": 99}))
+
+    found = discover_groups(channel, machine, pull_running=False)
+
+    assert found == {GROUP_ID: {"title": f"chat {GROUP_ID}", "type": "supergroup"}}
+    assert channel.polls == [(None, [], 0)]
+    assert machine.load_cursor("telegram") == {"offset": 4}
+
+
+def test_init_while_pull_runs_never_polls(bugs_home):
+    machine = Machine(bugs_home)
+    machine.note_unregistered({"id": FAMILY_ID, "title": "Famille", "type": "supergroup"}, BASE_DATE)
+    channel = FakeChannel(fake_batch(inbound(GROUP_ID, 1, "x")))
+
+    found = discover_groups(channel, machine, pull_running=True)
+
+    assert found == {FAMILY_ID: {"title": "Famille", "type": "supergroup"}}
+    assert channel.polls == []
+
+
+def test_backfill_records_the_one_human_administrator_of_that_name(tmp_path, bugs_home, capsys):
+    store = Machine(bugs_home).project_store("demo")
+    path = store.inbox / "20261002-083000-1"
+    path.mkdir(parents=True)
+    (path / "report.json").write_text(json.dumps({"id": "20261002-083000-1", "author": "izno_op", "author_id": None}))
+    channel = FakeChannel()
+    channel.admins = [fake_author(42, "izno_op"), fake_author(8, "izno_op", is_bot=True)]
+    channel.members = 2
+
+    people.cmd_backfill_authors(channel, store, GROUP_ID)
+
+    report = json.loads((path / "report.json").read_text())
+    assert (report["author_id"], report["author_username"]) == (42, "izno_op")
+    assert "author id recorded" in capsys.readouterr().out
+    assert channel.of("list_admins") == [("list_admins", GROUP_ID)]

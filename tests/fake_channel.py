@@ -28,20 +28,21 @@ def inbound(chat_id: ChatId, message_id: MessageId, text: str = "", *, date: flo
 
 
 def batch(*messages: InboundMessage, chats: dict | None = None, migrations: dict | None = None, cursor: dict | None = None) -> Batch:
-    """Return a batch; the chats default to those of ``messages``, the cursor to ``{"n": <count>}``."""
+    """Return a batch; the chats default to those of ``messages``, the cursor to ``{"offset": <count>}``."""
     seen = {m.chat_id: {"id": m.chat_id, "title": f"chat {m.chat_id}", "type": "supergroup"} for m in messages}
     return Batch(
         messages=list(messages),
         chats=seen if chats is None else chats,
         migrations=migrations or {},
-        cursor=cursor if cursor is not None else {"n": len(messages)},
+        cursor=cursor if cursor is not None else {"offset": len(messages)},
     )
 
 
 class FakeChannel:
     """Implements ``Channel``: ``poll`` hands out ``batches`` in turn, then empty ones keeping the cursor."""
 
-    kind = "fake"
+    # The machine keeps cursors by kind: the fake stands in for Telegram, whose cursor is {"offset": int}.
+    kind = "telegram"
 
     def __init__(self, *batches: Batch) -> None:
         self.batches = list(batches)
