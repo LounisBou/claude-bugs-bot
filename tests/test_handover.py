@@ -35,8 +35,10 @@ def test_read_archives_the_note_dated_and_records_it_in_the_state(run, bound):
     assert state["handovers"] == [{"read": "2026-10-02T08:31:00+00:00", "archive": str(archive)}]
 
 
-def test_read_twice_prints_nothing_new_and_keeps_the_note(run, bound, capsys):
-    # Review Focus 5: a successor that crashed half-way reads again.
+# -- Review Focus 5: a successor that crashed half-way, and a note nobody read ----------------
+
+
+def test_a_successor_that_crashed_half_way_reads_again_and_loses_nothing(run, bound, capsys):
     run("handover", "write", NOTE, now=BASE_DATE)
     run("handover", "read", now=BASE_DATE + 60)
     capsys.readouterr()
@@ -50,13 +52,15 @@ def test_read_twice_prints_nothing_new_and_keeps_the_note(run, bound, capsys):
 
 
 def test_write_refuses_while_an_unread_note_exists(run, bound, capsys):
-    # Review Focus 5: never overwrite a note nobody has read.
     run("handover", "write", NOTE, now=BASE_DATE)
 
     assert run("handover", "write", "autre chose", now=BASE_DATE + 60) == 1
 
     assert "unread" in capsys.readouterr().err
     assert (bound / "handover.md").read_text() == NOTE + "\n"
+
+
+# -- writing, reading, archiving ---------------------------------------------------------------
 
 
 def test_write_after_a_read_is_accepted(run, bound):
