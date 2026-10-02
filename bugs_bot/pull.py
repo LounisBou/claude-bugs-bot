@@ -25,6 +25,8 @@ BACKOFF_CEILING = 60
 # The 30-day purge needs no more than an hourly look.
 PURGE_EVERY = 3600
 RETENTION_DAYS = 30
+# What Telegram is asked to send: it keeps the last setting asked, so every poller asks for the same.
+ALLOWED_UPDATES = ("message",)
 GROUP_CHAT_TYPES = {"group", "supergroup"}
 
 
@@ -138,7 +140,7 @@ def cmd_pull(channel: Channel, machine: Machine, now: float, poll_timeout: int =
         BugsError: If a report could not be built, after every other one was (the others go to stderr).
     """
     entries = machine.registry.entries()
-    updates = channel.get_updates(machine.load_offset(), poll_timeout, ["message"])
+    updates = channel.get_updates(machine.load_offset(), poll_timeout, list(ALLOWED_UPDATES))
     aliases = follow_migrations(machine, entries, updates)
     for chat_id, chat in chats_seen(updates).items():
         if chat_id not in entries:

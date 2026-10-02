@@ -11,7 +11,7 @@ from bugs_bot.channel import Channel
 from bugs_bot.errors import BugsError
 from bugs_bot.jsonio import write_json
 from bugs_bot.project import PROJECT_FILE, Project, build_project, dump_project, find_project_file, load_project
-from bugs_bot.pull import chats_seen
+from bugs_bot.pull import ALLOWED_UPDATES, chats_seen
 from bugs_bot.store import Machine
 
 
@@ -91,7 +91,7 @@ def discover_groups(channel: Channel | None, machine: Machine, pull_running: boo
     """
     found = {cid: {"title": item["title"], "type": item["type"]} for cid, item in machine.unregistered().items()}
     if not pull_running and channel is not None:
-        updates = channel.get_updates(None, 0, ["message", "my_chat_member"])
+        updates = channel.get_updates(None, 0, list(ALLOWED_UPDATES))
         found |= {cid: {"title": chat.get("title") or "", "type": chat["type"]} for cid, chat in chats_seen(updates).items()}
     return found
 
