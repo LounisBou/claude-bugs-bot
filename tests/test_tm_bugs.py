@@ -243,7 +243,7 @@ def test_pull_rebinds_when_the_registered_chat_migrates(run, bugs_home, home, tm
 
     assert run("pull", transport=tg) == 0
 
-    assert list(Registry(bugs_home / "projects.json").entries()) == [GROUP_ID]
+    assert list(Registry(bugs_home / "projects.json").entries()) == [("telegram", GROUP_ID)]
     assert read_offset(home) == 13
     [rep] = reports(home)
     assert report_json(rep)["text"] == "après la migration"
@@ -257,7 +257,7 @@ def test_pull_ignores_migration_of_another_chat(run, bound):
 
     assert run("pull", transport=FakeTelegram([old])) == 0
 
-    assert list(Registry(bound.parent / "projects.json").entries()) == [GROUP_ID]
+    assert list(Registry(bound.parent / "projects.json").entries()) == [("telegram", GROUP_ID)]
     assert Machine(bound.parent).unregistered() == {}
 
 
