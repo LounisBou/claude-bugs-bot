@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from samples import BASE_DATE, GROUP_ID, OTHER_GROUP_ID, TOKEN, FakeTelegram, message
 
 from bugs_bot.channel import Attachment, Author, Batch, InboundMessage, mask
-from bugs_bot.channels import channel_for, token_present
+from bugs_bot.channels import channel_for, token_problem
 from bugs_bot.errors import BugsError
 from bugs_bot.store import Machine
 from bugs_bot.telegram import TelegramChannel
@@ -252,11 +250,14 @@ def test_the_factory_refuses_a_missing_token_without_printing_one(tmp_path, bugs
         channel_for("telegram", env, FakeTelegram())
 
 
-def test_token_present_tells_without_printing(env, tmp_path, capsys):
-    assert token_present("telegram", env) is True
-    assert token_present("telegram", {"BUGS_BOT_ENV_FILE": str(tmp_path / "none")}) is False
-    assert token_present("irc", env) is False
-    assert TOKEN not in json.dumps(capsys.readouterr())
+def test_token_problem_says_why_and_never_the_token(env, tmp_path):
+    other = tmp_path / "other.env"
+    other.write_text(f"SOMETHING={TOKEN}\n")
+
+    assert token_problem("telegram", env) is None
+    assert "cannot read the env file" in token_problem("telegram", {"BUGS_BOT_ENV_FILE": str(tmp_path / "none")})
+    assert token_problem("telegram", {"BUGS_BOT_ENV_FILE": str(other)}) == f"TELEGRAM_BOT_TOKEN not found in {other}"
+    assert token_problem("irc", env) == "unknown channel: irc"
 
 
 def test_mask_hides_the_secret_and_any_bot_token_shape():
