@@ -6,10 +6,12 @@ import importlib.util
 import json
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from bugs_bot import cli
 from conftest import REPO_ROOT
 from samples import GROUP_ID, TOKEN
 
@@ -272,3 +274,16 @@ def test_a_repository_without_a_project_file_is_refused(migrate, tmp_path):
 
 def test_a_bad_project_id_is_refused(migrate):
     assert migrate(project="../x") == 1
+
+
+def test_the_script_accepts_the_project_file_that_init_writes(migrate, tmp_path):
+    fresh = tmp_path / "fresh-repo"
+    fresh.mkdir()
+    subprocess.run(["git", "-C", str(fresh), "init", "-q"], check=True)
+    env = {"BUGS_BOT_HOME": str(tmp_path / "rehearsal-home")}
+    assert cli.main(
+        ["init", "--project", "demo", "--agent-title", "Agent : Demo", "--chat-id", str(GROUP_ID), "--title", "Demo", "--repo", str(fresh)],
+        env=env,
+    ) == 0
+
+    assert migrate(repo=fresh) == 0
