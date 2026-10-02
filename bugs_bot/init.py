@@ -14,8 +14,6 @@ from bugs_bot.project import PROJECT_FILE, Project, _build, dump_project, load_p
 from bugs_bot.pull import chats_seen
 from bugs_bot.store import Machine
 
-EXCLUDE_LINE = "/" + PROJECT_FILE
-
 
 @dataclass(frozen=True)
 class InitArgs:
@@ -58,6 +56,16 @@ def git_exclude_path(repo: Path) -> Path:
     return path if path.is_absolute() else repo / path
 
 
+def exclude_line(repo: Path) -> str:
+    """Return the ``info/exclude`` pattern of ``repo``'s project file.
+
+    Patterns there are anchored at the top of the working tree, so a repository
+    that is a subdirectory of it needs its path in front.
+    """
+    prefix = _git(repo, "rev-parse", "--show-prefix")  # "" at the root, else "sub/dir/"
+    return f"/{prefix}{PROJECT_FILE}"
+
+
 def add_exclude(repo: Path) -> bool:
     """Keep the project file out of git without touching the project's ``.gitignore``.
 
@@ -65,11 +73,12 @@ def add_exclude(repo: Path) -> bool:
         ``True`` when the line was added, ``False`` when it was already there.
     """
     path = git_exclude_path(repo)
+    line = exclude_line(repo)
     text = path.read_text() if path.exists() else ""
-    if EXCLUDE_LINE in (line.strip() for line in text.splitlines()):
+    if line in (existing.strip() for existing in text.splitlines()):
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text + ("" if not text or text.endswith("\n") else "\n") + EXCLUDE_LINE + "\n")
+    path.write_text(text + ("" if not text or text.endswith("\n") else "\n") + line + "\n")
     return True
 
 
@@ -160,7 +169,7 @@ def cmd_init(channel: Channel | None, machine: Machine, repo: Path, args: InitAr
     machine.registry.add(project.chat_id, project.project, repo)
     write_json(path, data)
     if add_exclude(repo):
-        print(f"added {EXCLUDE_LINE} to {exclude}")
+        print(f"added {exclude_line(repo)} to {exclude}")
     print(f"wrote {path}")
     print(f"registered {project.chat_id} -> {project.project} {repo}")
     return 0

@@ -193,6 +193,24 @@ def test_init_writes_every_option(repo, machine):
     assert project.docs == ("docs/a.md", "docs/") and project.language == "en" and project.gate_tokens == 150000
 
 
+def test_init_in_a_subdirectory_keeps_its_project_file_out_of_git_status(repo, machine):
+    sub = repo / "services" / "api"
+    sub.mkdir(parents=True)
+
+    assert cmd_init(None, machine, sub, args(), pull_running=False) == 0
+
+    assert (sub / PROJECT_FILE).exists()
+    assert git(repo, "status", "--porcelain") == ""
+    assert "/services/api/" + PROJECT_FILE in git_exclude_path(repo).read_text().splitlines()
+
+
+def test_init_at_the_root_still_writes_the_root_anchored_line(repo, machine):
+    cmd_init(None, machine, repo, args(), pull_running=False)
+
+    assert git_exclude_path(repo).read_text().splitlines().count(EXCLUDE_LINE) == 1
+    assert git(repo, "status", "--porcelain") == ""
+
+
 def test_init_adds_the_exclude_line_and_leaves_gitignore_alone(repo, machine):
     cmd_init(None, machine, repo, args(), pull_running=False)
 
