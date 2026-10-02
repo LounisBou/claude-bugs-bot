@@ -15,6 +15,11 @@ TTY = "/dev/ttys002"
 AGENT_MD = REPO_ROOT / "agent" / "AGENT.md"
 
 
+def project_file() -> Path:
+    """Return the project file of the ``bound`` fixture's repository (the current directory)."""
+    return Path.cwd() / ".bugs-bot.json"
+
+
 # -- gate -------------------------------------------------------------------------------------
 
 
@@ -31,25 +36,30 @@ def test_gate_set_is_the_one_line_that_changes_it(run, bound, home, capsys):
     assert run("gate") == 0
 
     assert capsys.readouterr().out.split() == ["gate_tokens=200000"]
-    assert json.loads((home / "settings.json").read_text())["context_gate_tokens"] == 200000
+    assert json.loads(project_file().read_text())["gate_tokens"] == 200000
 
 
-def test_gate_set_keeps_the_other_settings_and_never_touches_the_project_state(run, bound, home):
-    (home / "settings.json").write_text(json.dumps({"other": 1}))
+def test_gate_set_keeps_the_other_project_fields_and_never_touches_the_project_state(run, bound, home):
+    before_project = json.loads(project_file().read_text())
     (home / "state.json").write_text(json.dumps({"posts": []}))
     before = (home / "state.json").read_text()
 
     assert run("gate", "--set", "250000") == 0
 
-    assert json.loads((home / "settings.json").read_text()) == {"other": 1, "context_gate_tokens": 250000}
+    after = json.loads(project_file().read_text())
+    assert after.pop("gate_tokens") == 250000
+    assert {k: v for k, v in after.items() if k in before_project} == before_project
     assert (home / "state.json").read_text() == before
+    assert not (home / "settings.json").exists()
 
 
 @pytest.mark.parametrize("bad", ["0", "-5"])
 def test_gate_set_refuses_a_value_that_is_not_positive(run, bound, home, bad):
+    before = project_file().read_text()
+
     assert run("gate", "--set", bad) != 0
 
-    assert not (home / "settings.json").exists()
+    assert project_file().read_text() == before
 
 
 @pytest.mark.parametrize("bad", ["abc", "1.5"])
@@ -57,11 +67,11 @@ def test_gate_set_refuses_a_value_that_is_not_an_integer(run, bound, home, bad):
     with pytest.raises(SystemExit):
         run("gate", "--set", bad)
 
-    assert not (home / "settings.json").exists()
+    assert "gate_tokens" not in project_file().read_text()
 
 
 def test_gate_refuses_a_corrupt_setting_rather_than_guessing(run, bound, home, capsys):
-    (home / "settings.json").write_text(json.dumps({"context_gate_tokens": "lots"}))
+    project_file().write_text(json.dumps(json.loads(project_file().read_text()) | {"gate_tokens": "lots"}))
 
     assert run("gate") != 0
 
@@ -91,7 +101,9 @@ def test_gate_on_a_small_window_never_exceeds_the_setting(run, bound, capsys):
 def test_gate_says_whether_the_agent_has_reached_it(run, bound, capsys, tokens, verdict):
     assert run("gate", "--window", "1000000", "--tokens", tokens) == 0
 
-    assert capsys.readouterr().out.split() == ["gate_tokens=300000", f"handover={verdict}"]
+    assert capsys.readouterr().out.split() == [
+        "gate_tokens=300000", f"context_tokens={tokens}", "context_window=1000000", f"handover={verdict}",
+    ]
 
 
 # -- agent-prompt for a successor -------------------------------------------------------------
