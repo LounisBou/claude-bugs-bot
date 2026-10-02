@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import re
 import urllib.error
 import urllib.request
@@ -105,6 +106,52 @@ def with_mention(mention: Mention, text: str) -> tuple[str, list[dict]]:
     else:
         name, entity = mention["name"], {"type": "text_mention", "user": {"id": mention["user_id"]}}
     return f"{name} {text}", [{**entity, "offset": 0, "length": utf16_len(name)}]
+
+
+def largest_photo(sizes: list[dict]) -> dict:
+    """Return the biggest ``PhotoSize`` of a photo."""
+    return max(sizes, key=lambda s: (s.get("file_size") or 0, s.get("width", 0) * s.get("height", 0)))
+
+
+def attachments(msg: dict) -> list[tuple[str, str]]:
+    """Return ``(file_id, extension)`` for each image carried by a message."""
+    found = []
+    if msg.get("photo"):
+        found.append((largest_photo(msg["photo"])["file_id"], ".jpg"))
+    doc = msg.get("document")
+    if doc and str(doc.get("mime_type", "")).startswith("image/"):
+        ext = Path(doc.get("file_name") or "").suffix or mimetypes.guess_extension(doc["mime_type"]) or ".img"
+        found.append((doc["file_id"], ext.lower()))
+    return found
+
+
+def has_content(msg: dict) -> bool:
+    """Tell a report from a service message (title change, migration...) or a bot post."""
+    if (msg.get("from") or {}).get("is_bot"):
+        return False  # the bot's own posts (the group's how-to, replies) are not reports
+    return bool(msg.get("text") or msg.get("caption") or attachments(msg))
+
+
+def author_of(msg: dict) -> str:
+    """Return the author as Telegram gives it: username, else first name."""
+    sender = msg.get("from") or {}
+    return sender.get("username") or sender.get("first_name") or ""
+
+
+def group_messages(messages: list[dict]) -> list[list[dict]]:
+    """Group messages by ``media_group_id``; the others stay alone. Order is kept."""
+    groups: list[list[dict]] = []
+    by_media: dict[str, list[dict]] = {}
+    for msg in messages:
+        media_id = msg.get("media_group_id")
+        if media_id is None:
+            groups.append([msg])
+        elif media_id in by_media:
+            by_media[media_id].append(msg)
+        else:
+            by_media[media_id] = [msg]
+            groups.append(by_media[media_id])
+    return groups
 
 
 class Api:
