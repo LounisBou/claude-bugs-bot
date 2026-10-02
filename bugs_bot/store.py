@@ -92,7 +92,7 @@ class Store:
         self.people = home / "people"
 
     def load_state(self) -> dict:
-        """Return the state, or ``{}`` before the first ``bind``."""
+        """Return the project's state (``posts``...), or ``{}`` while there is none."""
         try:
             return json.loads(self.state_path.read_text())
         except FileNotFoundError:

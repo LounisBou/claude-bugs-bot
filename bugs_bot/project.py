@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import math
 import re
-from dataclasses import dataclass
+import sys
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from bugs_bot.errors import BugsError
+from bugs_bot.jsonio import write_json
 
 if TYPE_CHECKING:
     from bugs_bot.registry import Registry
@@ -137,6 +139,19 @@ def dump_project(project: Project) -> dict:
         "follow_up_hours": project.follow_up_hours,
     }
     return data
+
+
+def rebind_chat(path: Path, chat_id: int) -> None:
+    """Write a new chat id into a project file, after the group was promoted to a supergroup.
+
+    A file that cannot be loaded is left alone and said on stderr: the registry already routes.
+    """
+    try:
+        project = load_project(path)
+    except BugsError as exc:
+        print(f"bugs-bot: {path} not updated to chat {chat_id}: {exc}", file=sys.stderr)
+        return
+    write_json(path, dump_project(replace(project, chat_id=chat_id)))
 
 
 def resolve_project(name: str | None, cwd: Path, registry: Registry) -> Project:
