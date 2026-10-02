@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -76,3 +80,68 @@ def test_seven_to_forty_hex_digits_are_accepted(run, bound, good, capsys):
     assert run("deployed", good) == 0
 
     assert capsys.readouterr().out.strip() == "deployed=yes"
+
+
+def alive(pid: int) -> bool:
+    """Tell whether process ``pid`` still runs (a zombie waiting to be reaped is not a process left)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def test_a_check_that_times_out_is_reported_without_its_command_and_leaves_no_process(
+    run, bound, tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr("bugs_bot.agent.DEPLOY_CHECK_TIMEOUT", 1)
+    pidfile = tmp_path / "grandchild.pid"
+    set_check(f"sleep 30 & echo $! > '{pidfile}'; wait # fake-secret-token-123")
+
+    try:
+        assert run("deployed", COMMIT) == 1
+        out = capsys.readouterr()
+
+        assert "the deploy check timed out after 1 s" in out.err
+        assert "fake-secret-token-123" not in out.out + out.err
+        assert "deployed=" not in out.out
+        grandchild = int(pidfile.read_text())
+        deadline = time.monotonic() + 3
+        while alive(grandchild) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not alive(grandchild)
+    finally:
+        if pidfile.exists() and alive(int(pidfile.read_text())):
+            os.kill(int(pidfile.read_text()), signal.SIGKILL)
+
+
+def test_a_check_that_cannot_run_is_reported_without_its_command(run, bound, monkeypatch, capsys):
+    set_check("true # fake-secret-token-123")
+
+    def fail(*args, **kwargs):
+        raise OSError(2, "No such file or directory")
+
+    monkeypatch.setattr(subprocess, "Popen", fail)
+
+    assert run("deployed", COMMIT) == 1
+    out = capsys.readouterr()
+
+    assert "the deploy check could not run: No such file or directory" in out.err
+    assert "fake-secret-token-123" not in out.out + out.err
+
+
+def test_the_check_reads_no_standard_input_and_leads_its_own_process_group(run, bound, monkeypatch):
+    set_check("true")
+    seen = {}
+    real = subprocess.Popen
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", spy)
+
+    assert run("deployed", COMMIT) == 0
+    assert seen["stdin"] == subprocess.DEVNULL
+    assert seen["start_new_session"] is True

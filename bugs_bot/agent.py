@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import signal
 import subprocess
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
@@ -202,15 +204,26 @@ def cmd_deployed(project: Project, commit: str, env: Mapping[str, str]) -> int:
         print("deployed=unknown: the launcher's word decides")
         return 2
     try:
-        done = subprocess.run(
+        # Its own session, so a timeout can take down everything the shell started; no stdin, so a
+        # check that asks a question fails instead of hanging. The messages never echo the command:
+        # it may hold a secret.
+        proc = subprocess.Popen(
             project.deploy_check,
             shell=True,
             cwd=project.repo,
             env={**env, "BUGS_BOT_COMMIT": commit},
-            capture_output=True,
-            timeout=DEPLOY_CHECK_TIMEOUT,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise BugsError(f"the deploy check did not complete: {exc}") from None
-    print(f"deployed={'yes' if done.returncode == 0 else 'no'}")
-    return 0 if done.returncode == 0 else 1
+    except OSError as exc:
+        raise BugsError(f"the deploy check could not run: {exc.strerror or exc.__class__.__name__}") from None
+    try:
+        returncode = proc.wait(timeout=DEPLOY_CHECK_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+        raise BugsError(f"the deploy check timed out after {DEPLOY_CHECK_TIMEOUT:g} s") from None
+    print(f"deployed={'yes' if returncode == 0 else 'no'}")
+    return 0 if returncode == 0 else 1
