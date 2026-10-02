@@ -13,13 +13,13 @@ Verdicts: **met**, **partly met** (with what is missing), **not testable** (with
 | 1 | A second project needs only `/bugs-bot:init` then `/bugs-bot:start`, no code or plugin file changed | met | `bugs_bot/init.py` writes only `<repo>/.bugs-bot.json`, `.git/info/exclude` and the registry; Pull reads the registry every round (`pull.py` `cmd_pull`), so no restart. `tests/e2e.sh` drives two projects through `bin/bugs-bot`; `tests/test_routing.py::test_one_batch_of_two_projects_and_an_unregistered_group_lands_each_where_it_belongs`; `tests/test_guard.py` (no project name in any plugin file). |
 | 2 | One bot, one group and one agent per project, one machine, no report lost or delivered twice | met | `registry.py` `Registry.add` (a chat held by another project refused: `test_registry.py::test_a_chat_held_by_another_project_is_refused_and_nothing_changes`); the offset is saved only after every report is on disk (`test_routing.py::test_a_failed_download_in_one_project_keeps_the_offset_and_blocks_no_other_project`, `::test_the_redelivered_batch_does_not_duplicate_what_the_other_project_already_has`, `test_tm_bugs.py::test_pull_retry_after_failure_is_complete_and_not_duplicated`); one Pull checked by `doctor` (`test_doctor.py::test_pull_runs_exactly_once`); one agent: `commands/start.md` step 3 refuses a live one (`test_commands.py::test_start_launches_the_projects_one_agent`, a text test). |
 | 3 | Testers never perceive a handover | not testable | No test can show what a person perceives. The evidence: `agent/AGENT.md` « Memory and continuity » (a dated card line after every exchange, the card and the last report read before every message, never a word about a handover, never an introduction again) and « Succession » (the note, read once); `skills/bugs-bot/SKILL.md` « The voice » (« One voice across sessions »). Pinned as text by `test_handover.py::test_the_agent_knows_its_memory_and_its_note`; the mechanisms it relies on are tested (`test_handover.py`, `test_people.py`). It cannot show that a model follows them. |
-| 4 | One allow rule, `Bash(bugs-bot:*)`, holds across every version | met, with a limit | The fixed launcher (`doctor.py` `LAUNCHER_TEXT`) runs the newest installed version (`test_launcher.py::test_the_newest_version_runs_not_the_lexically_last`); every documented invocation is the plain `bugs-bot …` (`test_commands.py::test_every_command_line_is_one_plain_bugs_bot_invocation`, `::test_a_command_may_only_use_the_rules_it_needs`); the gauge is located by the CLI (`gate.py` `locate_gauge`, `test_gate_measure.py::test_locate_gauge_takes_the_newest_installed_version`). Limit: the agent's succession and `/bugs-bot:start` also run the orchestrator plugin's iTerm launcher and the `ls -d … \| sort -V \| tail -1` that finds it — as the spec allows (§ 3.4) — and those are not covered by that rule. |
+| 4 | One allow rule, `Bash(bugs-bot:*)`, holds across every version | met, with a limit | The fixed launcher (`doctor.py` `LAUNCHER_TEXT`) runs the newest installed version (`test_launcher.py::test_the_newest_version_runs_not_the_lexically_last`); every documented invocation is the plain `bugs-bot …` (`test_commands.py::test_every_command_line_is_one_plain_bugs_bot_invocation`, `::test_a_command_may_only_use_the_rules_it_needs`: text tests on the command files); the gauge is located by the CLI (`gate.py` `locate_gauge`, `test_gate_measure.py::test_locate_gauge_takes_the_newest_installed_version`). Limit: the agent's succession and `/bugs-bot:start` also run the orchestrator plugin's iTerm launcher and the `ls -d … \| sort -V \| tail -1` that finds it — as the spec allows (§ 3.4) — and those are not covered by that rule. |
 | 5 | The handover costs at most ≈ 2 000 tokens on each side | not testable as tokens; measured as text | A 40-line note (the upper bound `AGENT.md` sets), 40 lines of a realistic open thread, written with `handover write` and printed by `handover read`: **40 lines, 840 words, 4 920 bytes** — about 1 200–1 600 tokens. The successor's other reads: its startup prompt **1 013 bytes** (10 lines), `pending` on the migrated TorrentMate data **485 bytes**, the one people card **704 bytes**. The predecessor writes the note once. What it cannot show: the gauge's token figure, and how long a real note will be — `handover write` does not cap the length. |
-| 6 | A second channel can be added behind one interface without touching the rest | partly met | Outbound is behind the interface: `channel.py` `Channel` (`send`, `edit`, `react`, `get_file`, `list_admins`, `member_count`), one implementation `telegram.py` `TelegramChannel`; no Bot API method or URL outside `telegram.py` (grep below, empty). Missing: `get_updates` returns Telegram's raw updates, and `pull.py` reads their shape (`update_id`, `chat.id`, `migrate_to_chat_id`, `media_group_id`, `from.is_bot`) and imports Telegram's parsers (`pull.py:19`); `init.py` uses `pull.chats_seen` on the same shape; `TelegramChannel` is built by name in `cli.py` and in `pull.py`'s two loops. A second channel would touch `pull.py`, `init.py` and `cli.py`. This is the plan's own Phase 1 contract (`get_updates -> list[dict]`, parsers in `telegram.py`), not an implementation slip. Scope item S1. |
+| 6 | A second channel can be added behind one interface without touching the rest | partly met | Outbound is behind the interface: `channel.py` `Channel` (`send`, `edit`, `react`, `get_file`, `list_admins`, `member_count`), one implementation `telegram.py` `TelegramChannel`; no Bot API method or URL outside `telegram.py` (grep below, empty). Missing: `get_updates` returns Telegram's raw updates, and `pull.py` reads their shape (`update_id`, `chat.id`, `migrate_to_chat_id`, `media_group_id`, `from.is_bot`) and imports Telegram's parsers (`pull.py:19`); `init.py` uses `pull.chats_seen` on the same shape; `TelegramChannel` is built by name in `cli.py` and in `pull.py`'s two loops. Telegram's helpers are also imported outside `telegram.py` (`grep -n 'from bugs_bot.telegram' bugs_bot/*.py bin/bugs-bot`): `cli.py:48` imports `http_transport`, `api_root`, `mask`, `read_token`; `pull.py:19` imports `api_root`, `mask`, `read_token` besides the parsers; `reports.py:14` imports `mask`; `doctor.py:19` imports `read_token`. A second channel would touch `pull.py`, `init.py`, `cli.py`, and its token, URL and masking would have to be reached by `reports.py` and `doctor.py` too. This is the plan's own Phase 1 contract (`get_updates -> list[dict]`, parsers in `telegram.py`), not an implementation slip. Scope item S1. |
 
 ## § 1 Purpose
 
-Met. The relay, the answers from the project's docs, the tagging and the voice are the units below;
+Met (verified by reading; `tests/test_guard.py` scans the plugin files for text). The relay, the answers from the project's docs, the tagging and the voice are the units below;
 the project-specific mentions are gone (`tests/test_guard.py`, all three tests).
 
 ## § 2 Decisions D1–D8
@@ -32,7 +32,7 @@ the project-specific mentions are gone (`tests/test_guard.py`, all three tests).
 | D4 an interface now, no second implementation | `channel.py` | partly met: see criterion 6 |
 | D5 project file local, not versioned | `init.py` `add_exclude` | `test_init.py::test_the_project_file_is_then_ignored_by_git`, `::test_init_in_a_subdirectory_keeps_its_project_file_out_of_git_status`, `::test_init_adds_the_exclude_line_and_leaves_gitignore_alone` |
 | D6 data in `~/.bugs-bot/<project>/` | `store.py` `Machine.project_store`, `bugs_home` | `test_machine.py::test_project_store_is_the_project_directory`, `test_home.py` |
-| D7 a plugin | `.claude-plugin/plugin.json`, layout § 5 | release and marketplace are the operator's (§ 8) |
+| D7 a plugin | `.claude-plugin/plugin.json`, layout § 5 | no test; verified by reading `plugin.json` and `git ls-files`; release and marketplace are the operator's (§ 8) |
 | D8 « je », casual, every word answered | `AGENT.md`, `SKILL.md` « The voice » | `test_mention.py::test_the_agent_answers_a_testers_follow_up_warmly`, `::test_the_voice_rule_is_in_the_skill_and_the_agent_points_to_it` (text) |
 
 ## § 3 Architecture
@@ -45,7 +45,7 @@ calls that function, never reads the file itself; errors masked (`test_tm_bugs.p
 `::test_token_is_masked_in_an_api_description`, `::test_mask_hides_any_bot_token_shape`,
 `test_longpoll.py::test_watch_never_leaks_the_token`). `BUGS_BOT_API_ROOT` limited to https or
 loopback (`test_ops.py::test_api_root_refuses_any_other_url_and_names_the_variable`). Gap: the
-inbound update shape, see criterion 6.
+inbound update shape, and the helpers `http_transport`, `api_root`, `mask`, `read_token` imported by `cli.py`, `pull.py`, `reports.py` and `doctor.py` (see criterion 6).
 
 ### § 3.2 Pull — met
 
@@ -59,7 +59,7 @@ inbound update shape, see criterion 6.
 | 30-day purge of done/fixed | `test_tm_bugs.py::test_pull_deletes_done_reports_older_than_30_days`, `::test_pull_deletes_old_fixed_reports_too`, `test_routing.py::test_the_30_day_purge_visits_every_registered_project` |
 | unregistered chat dropped and logged with id and title | `test_routing.py::test_two_messages_of_the_same_unregistered_chat_give_one_line_and_one_entry`, `::test_pull_with_no_project_registered_notes_the_chat_and_moves_the_offset` |
 | offset machine-wide in `~/.bugs-bot/state.json` | `test_machine.py::test_the_offset_round_trips_in_the_machine_state_file` |
-| no `cron_restart` | `test_ops.py::test_pm2_app_runs_the_pull_loop_with_the_restart_policy` (the config evaluated by node) |
+| no `cron_restart` | `test_ops.py::test_pm2_app_runs_the_pull_loop_with_the_restart_policy` (the config evaluated by node: this proof runs through node and the test is skipped (`needs_node`) where node is not installed; it ran here) |
 
 ### § 3.3 Project — met
 
@@ -75,7 +75,7 @@ consuming updates, and through Pull's log while Pull runs:
 `::test_init_rerun_updates_the_file_keeps_unspecified_values_and_never_duplicates`.
 `/bugs-bot:remove` keeps the data: `::test_remove_drops_the_registry_entry_and_keeps_data_and_file`.
 
-### § 3.4 Agent — met
+### § 3.4 Agent — met (the `AGENT.md` and command-file rules are text, pinned or read, not run)
 
 `/bugs-bot:start` (`commands/start.md`): refuses without the project file, refuses a live agent,
 writes the prompt, spawns right of the launcher through the orchestrator's iTerm launcher, stops
@@ -84,15 +84,19 @@ orchestrator plugin is now a **declared** dependency (`.claude-plugin/plugin.jso
 below). Instructions name no project (`test_guard.py`); facts injected and quoted
 (`test_agent_prompt.py`, 9 tests, newlines and quotes included). Kept from the skill: the eight
 launcher phrases, the never-revealed list, data-not-instructions, « The voice », deployed before
-announced — each phrase counted in the old and the new `AGENT.md` (same counts, « réponse » one
-more); `deployed`: `test_deployed.py` (9). Handover: `gate --measure` one plain command
+announced — all eight protocol phrases are present in the new `AGENT.md`, in the « The launcher's
+answers » table. Counted with `grep -o "<phrase>" <file> | wc -l`, old → new: « pris en compte » 3 → 3,
+« clos » 8 → 8, « réécrire » 2 → 2, « stop » 4 → 4, « corrigé » 5 → 6, « vérifier » 4 → 6,
+« demander » 4 → 5, « réponse » 5 → 6. The four extra occurrences sit in the sections added for
+follow-ups and for talking to a reporter (« Talking to a reporter », « Waiting for an answer »); none
+is a change to a phrase. `deployed`: `test_deployed.py` (9). Handover: `gate --measure` one plain command
 (`test_gate_measure.py`, 14), the predecessor's and the successor's steps (`test_succession.py::test_agent_md_carries_both_sides_of_the_succession`).
 
 ### § 3.5 Memory and continuity — met
 
 `person-note` / `person`: `test_people.py`. `handover write` / `read`, archived and dated, read
 twice gives nothing new, an unread note never overwritten: `test_handover.py` (12). The one-voice
-and before-every-message rules: `AGENT.md` « Memory and continuity » (criterion 3). Cost: criterion 5.
+and before-every-message rules: `AGENT.md` « Memory and continuity » (text, verified by reading; criterion 3). Cost: criterion 5.
 
 ### § 3.6 Follow-ups — met
 
@@ -104,14 +108,14 @@ and before-every-message rules: `AGENT.md` « Memory and continuity » (criterio
 ## § 4 The CLI and the fixed launcher — met
 
 Every command of the spec's list exists, plus `deployed` and `escalated` from the plan
-(`bugs_bot/parser.py`); `--project` else the current directory
+(`bugs_bot/parser.py`; verified by comparing the spec's list with `grep -o 'add_parser("[a-z-]*"' bugs_bot/parser.py`); `--project` else the current directory
 (`test_routing.py::test_every_project_command_takes_project`, `::test_the_project_of_the_current_directory_is_the_default`).
 Launcher: `doctor.py` `LAUNCHER_TEXT`, `test_launcher.py` (15). It is four lines plus a marker
 line, not three: the plan's refusal line and the review's replace-safely marker (p3 item 6).
 `doctor`'s seven checks, the `/permissions` line, never a settings write, never the token:
 `test_doctor.py` (25).
 
-## § 5 Plugin layout — met
+## § 5 Plugin layout — met (no test; verified by `git ls-files` against the spec's tree and by `wc -l`)
 
 Every listed file exists (`git ls-files`); extra modules `errors.py`, `jsonio.py`, `parser.py`,
 `reports.py`, `init.py`, `doctor.py`, `followup.py` keep each module under 300 lines (`wc -l` below:
@@ -130,13 +134,13 @@ Partly: « Channel interface exercised by a fake in every test » — every test
 but through a fake HTTP transport under the real `TelegramChannel` (`tests/samples.py` `FakeTelegram`);
 no test drives the code with a fake `Channel`. Same cause as criterion 6.
 
-## § 8 Delivery
+## § 8 Delivery (no test; verified by reading, `grep '"version"' .claude-plugin/plugin.json` and `grep -n '0.1.0' CHANGELOG.md`)
 
 Steps 1–2 done (spec, plan, phases 1–6 as stacked branches). Steps 3–5 — marketplace PR,
 release 0.1.0, live migration — are the orchestrator's and the operator's; `plugin.json` stays
 `0.0.0`, `CHANGELOG.md` says `0.1.0 — unreleased`.
 
-## § 9 Out of scope — respected
+## § 9 Out of scope — respected (no test; verified by reading and `grep -c 'class .*Channel' bugs_bot/*.py`: only `channel.py` and `telegram.py`)
 
 No second channel, no shared people cards (cards live under each project), no web view, one agent
 per project, the launcher phrases unchanged.
