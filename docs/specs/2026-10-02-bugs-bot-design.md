@@ -94,7 +94,8 @@ new group). The update offset is machine-wide, in `~/.bugs-bot/state.json`. No `
     "deploy_check": "optional shell command proving a commit is served; absent = the launcher checks",
     "docs": ["docs/reference/product-intent.md", "docs/reference/", "docs/production/"],
     "language": "fr",
-    "gate_tokens": 200000
+    "gate_tokens": 200000,
+    "follow_up_hours": 24
   }
   ```
 
@@ -153,13 +154,33 @@ launcher, wait armed).
   « I'm new here »; the agent never introduces itself again.
 - Cost: the note ≈ 1–2 k tokens each side; cards read only when writing to that person.
 
+### 3.6 Follow-ups (operator, 2026-10-02)
+
+« si un utilisateur ne répond pas à un message, demande d'info, confirmation de résolution de bug ou
+autre (seulement les messages qui sont vraiment des attentes d'informations, pas juste un bonjour ou
+de rien) alors on le relance au bout de 24h (ce délai doit être paramétrable 24h est le délai par
+défaut) ».
+
+- A message the agent posts that truly waits for the person's answer — a question asking for
+  information (« demander », the in-doubt question), a request to verify a fix (« vérifier »), any
+  other message that asks them something — is posted with `--awaits`: the report records
+  `awaiting = {since, reply}`. A greeting, a thank-you, « de rien », a plain acknowledgement never
+  awaits.
+- A new message from the same person (same `author_id`, else same display name) in the group after
+  `since` answers it: Pull clears `awaiting` on their reports.
+- When `awaiting` is older than `follow_up_hours` (project file, default 24), `bugs-bot wait` wakes the
+  agent with `follow-up <report-id>`; the agent sends ONE reminder, threaded and mentioning the
+  person, in « The voice » (light, warm, never a reproach, never the first message repeated), posted
+  with `--follow-up`, which records it so the same wait is reminded once.
+- `bugs-bot overdue` lists the follow-ups due (also part of the restart's `pending` listing).
+
 ## 4. The CLI and the fixed launcher
 
 All commands through one entry point, `bugs-bot <command> [--project <p>]` (the project
 defaults to the one whose `.bugs-bot.json` is in the current directory or a parent). Commands:
 today's (`pull`, `list`, `show`, `reply`, `edit`, `fixed`, `taken`, `done`, `post`,
 `backfill-authors`, `person`, `person-note`, `wait`, `triage`, `pending`, `agent-prompt`, `gate`)
-plus `init`, `remove`, `handover write|read`, `doctor`.
+plus `init`, `remove`, `handover write|read`, `doctor`, `overdue`.
 
 `/bugs-bot:doctor` installs `~/.local/bin/bugs-bot`, a 3-line launcher that runs the newest
 installed version of the plugin's CLI, and checks: python3 ≥ 3.10, the token readable, the

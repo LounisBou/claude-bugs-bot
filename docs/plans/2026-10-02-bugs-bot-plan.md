@@ -90,7 +90,7 @@ each pinned by a test in the phase that owns the code:
 | 1 | conversion | `feat/p1-package` (`main`) | plugin skeleton; `tm_bugs.py` split into `bugs_bot/` modules + `bin/bugs-bot`; the 173 tests carried over, green, behaviour unchanged |
 | 2 | behaviour | `feat/p2-projects` (p1) | project file, registry, data under `~/.bugs-bot/<project>/`, machine offset, Pull routes by chat id, `--project`; `bind` removed |
 | 3 | behaviour | `feat/p3-init-doctor` (p2) | `init`, `remove`, `doctor`, the fixed launcher; `/bugs-bot:init`, `/bugs-bot:remove`, `/bugs-bot:doctor` |
-| 4 | behaviour | `feat/p4-agent` (p3) | generic `AGENT.md` + `SKILL.md`, startup-prompt injection, `/bugs-bot:start`, `handover write\|read`, `gate --measure`, `deployed`, the project-name guard |
+| 4 | behaviour | `feat/p4-agent` (p3) | generic `AGENT.md` + `SKILL.md`, startup-prompt injection, `/bugs-bot:start`, `handover write\|read`, `gate --measure`, `deployed`, follow-ups after `follow_up_hours` (spec § 3.6), the project-name guard |
 | 5 | behaviour | `feat/p5-ops` (p4) | `pm2.config.js` (`bugs-bot-pull`), the migration script and its rehearsal test, the E2E script, README, CHANGELOG |
 | 6 | verification | `feat/p6-verify` (p5) | spec conformity section by section, E2E run, fixes of what it finds only |
 
@@ -243,6 +243,7 @@ class Project:
     docs: tuple[str, ...] = ()
     language: str = "fr"
     gate_tokens: int = DEFAULT_GATE_TOKENS
+    follow_up_hours: float = 24        # spec § 3.6; > 0, BugsError otherwise
 
 def find_project_file(start: Path) -> Path | None          # start, then each parent
 def load_project(path: Path) -> Project                     # BugsError naming the bad key
@@ -410,11 +411,11 @@ worktree's common git dir; doctor reading but never editing settings; `sort -V` 
   deployed-before-announced rule, « the agent runs no command other than `bugs-bot …` and the
   iTerm launcher ». The gauge's two plain commands become one: `bugs-bot gate --measure`.
   Memory and continuity (spec § 3.5) written into `AGENT.md`.
-- Create: `bugs_bot/handover.py`, `commands/start.md`, `tests/test_handover.py`,
+- Create: `bugs_bot/handover.py`, `bugs_bot/followup.py`, `commands/start.md`, `tests/test_followup.py`, `tests/test_handover.py`,
   `tests/test_gate_measure.py`, `tests/test_agent_prompt.py`, `tests/test_guard.py`.
 - Modify: `agent.py` (prompt injection; launcher record moves from `agent.json` into
   `<project>/state.json["agent"]`), `gate.py` (`gate_tokens` from the project file; `--set` writes
-  it there; `settings.json` dropped), `cli.py` (`handover`, `gate --measure`, `deployed`).
+  it there; `settings.json` dropped), `cli.py` (`handover`, `gate --measure`, `deployed`, `overdue`, `--awaits`/`--follow-up`), `pull.py` (calls `clear_answered` for each new report), `reports.py` (`--awaits`, `--follow-up`).
 
 **Interfaces — Produces:**
 
@@ -446,6 +447,35 @@ bugs-bot deployed <commit>      # runs deploy_check with BUGS_BOT_COMMIT=<commit
                                 # no deploy_check → "deployed=unknown: the launcher's word decides", exit 2
 ```
 
+
+**Follow-ups (spec § 3.6, operator's order 2026-10-02).** `Project.follow_up_hours` exists from
+Phase 2 (parsed and validated there); Phase 4 builds the behaviour:
+
+```python
+# bugs_bot/followup.py
+def mark_awaiting(report_dir: Path, report: dict, reply_index: int, now: float) -> None
+    # report["awaiting"] = {"since": iso(now), "reply": reply_index}; cleared by clear_answered
+def clear_answered(store: Store, author_id: int | None, author: str, since: float) -> list[str]
+    # called by Pull for every new report: clears "awaiting" on that person's reports whose
+    # "since" precedes the new message; returns the cleared ids
+def due(store: Store, hours: float, now: float) -> list[str]
+    # report ids whose "awaiting" is older than hours and not yet reminded
+def mark_reminded(report_dir: Path, report: dict, now: float) -> None
+    # report["awaiting"]["reminded"] = iso(now): one reminder per awaited message
+
+# CLI
+bugs-bot reply <id> "<text>" [--mention] [--awaits | --follow-up]   # exclusive; --follow-up needs a due awaiting
+bugs-bot edit  <id> "<text>" [--reply N] [--mention] [--awaits]
+bugs-bot overdue                                                    # one line per due follow-up
+bugs-bot wait                                                       # now also prints "follow-up <id>" when one falls due
+```
+
+`AGENT.md`: « demander », « vérifier », the in-doubt question and any message of the agent's own that
+asks the person something are posted with `--awaits`; a greeting, a thank-you, « de rien » never.
+On `follow-up <id>`: `person <id>`, `show <id>`, then ONE reminder `reply <id> "<text>" --mention
+--follow-up`, in « The voice » (light, warm, never a reproach, never the first message repeated).
+`pending` shows due follow-ups at restart.
+
 `/bugs-bot:start` (`commands/start.md`): refuses without `.bugs-bot.json` (points to
 `/bugs-bot:init`); `ListAgents` — a live row named `agent_title` → refuse (« you already have
 one » / « it belongs to <launcher> », from `state.json["agent"]`); `bugs-bot agent-prompt
@@ -463,7 +493,10 @@ shape refusals (carried over); handover write/read/read-again/unread-refusal (Re
 archive name and `state.json` entry; `gate --measure` with a stub gauge script printing
 `context_tokens=310000` / `context_window=1000000` → `handover=yes`, and a failing gauge → exit 1;
 `gate --set` writes the project file; small window rule (80 %) carried over; `deployed` three
-outcomes; guard test.
+outcomes; follow-ups: `--awaits` records, a later message of the same person clears (and of
+another person does not), `due` at `follow_up_hours` − 1 s / + 1 s, one reminder only (`--follow-up` twice
+refused), `wait` wakes on a due follow-up, `follow_up_hours` from the project file (non-default
+value); guard test.
 
 **Definition of done:** draft PR stacked on p3; suite green including the guard; `grep -n
 'python3 \|\$(' agent/AGENT.md skills/bugs-bot/SKILL.md commands/*.md` shows no invocation other
