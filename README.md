@@ -69,6 +69,13 @@ channel since its cursor and the threads of its open reports; while a Slack proj
 Telegram's held request is cut to 10 s, so both are read in the same process. HTTP 429 is honoured
 (`Retry-After`). `BUGS_BOT_SLACK_API_ROOT` points the Slack channel at a fake (end-to-end runs only).
 
+## Known limitations
+
+- **An edit on Slack is not seen.** A tester who edits a message on Telegram updates its report
+  (`edited <id>`); on Slack, Pull reads `conversations.history`, which never returns
+  `message_changed` (an Events API and RTM event only), so the report keeps the text first
+  posted. Its detection comes with the live Slack test.
+
 ## Requirements
 
 - `python3` 3.10 or newer; the standard library only.

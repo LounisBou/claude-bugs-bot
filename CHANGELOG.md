@@ -42,3 +42,9 @@ First release: the single-project Telegram bug relay, made a generic Claude Code
   project's lock, the previous text kept in the report's `edits`; `wait` prints `edited <id>` until
   `show` has printed it. An edit never creates a report, never sets or clears a wait, never changes a
   status or a reaction; the edit of a message no report records is ignored.
+
+### Known limitations
+
+- An edit of a message on Slack is not seen: Pull polls `conversations.history`, which never returns
+  `message_changed` (an Events API and RTM event only). The report keeps the text first posted; edits
+  are read on Telegram only. Detection comes with the live Slack test.
