@@ -147,6 +147,7 @@ def cmd_pull(
     poll_timeout: int = 0,
     purge: bool = True,
     chats: list[ChatId] | None = None,
+    quiet: bool = False,
 ) -> None:
     """Collect new messages of every registered chat of the channel into its project's reports.
 
@@ -163,6 +164,7 @@ def cmd_pull(
         poll_timeout: Seconds the channel may hold the request waiting for a message (0: answer at once).
         purge: Also delete closed reports past retention.
         chats: Only these chats of the channel (default: every registered one).
+        quiet: Print no « no new report » line (a loop of rounds would print it every round).
 
     Raises:
         BugsError: If a report could not be built, after every other one was (the others go to stderr).
@@ -214,8 +216,8 @@ def cmd_pull(
             if answered:
                 answers.append((project, answered))
             clear_answered(store, msg.author.id, msg.author.name, msg.date)
-    if not created and not answers and not failures and not poll_timeout:
-        print("bugs-bot: no new report")  # a scheduled run leaves a trace in the PM2 log; a held one would flood it
+    if not created and not answers and not failures and not quiet:
+        print("bugs-bot: no new report")  # a scheduled run leaves a trace in the PM2 log
     for project, report_id, group in created:
         images = sum(len(m.attachments) for m in group)
         print(f"new {report_id} ({images} image{'s' * (images != 1)}) in {project}")

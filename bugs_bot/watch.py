@@ -43,29 +43,40 @@ class Failure:
         return float(getattr(self.error, "retry_after", 0) or 0)
 
 
-def pull_round(machine: Machine, env: Mapping[str, str], transport: Transport, now: float, poll_timeout: int = 0, purge: bool = True) -> list[Failure]:
+def pull_round(
+    machine: Machine,
+    env: Mapping[str, str],
+    transport: Transport,
+    now: float,
+    poll_timeout: int = 0,
+    purge: bool = True,
+    quiet: bool = False,
+) -> tuple[list[Failure], bool]:
     """Pull every channel kind once: the long-polled one first (held ``poll_timeout`` s, or ``SHORT_HOLD`` while
     another kind is registered), then each chat of every other kind, its cursor saved after its own batch.
 
     Telegram is read while one of its projects is registered, while nothing at all is, or while its token is there:
     the chats it drops are how ``init`` finds a new group. One channel's failure never keeps another unread.
+    ``quiet`` drops the « no new report » trace (a loop of rounds would print it every few seconds).
 
     Returns:
-        The failures, in order; empty when every pull went through.
+        ``(the failures in order, empty when every pull went through; whether a read was held)``.
     """
     try:
         entries = machine.registry.entries()  # read afresh each round: a new registration needs no restart
     except BugsError as exc:
-        return [Failure(exc, None)]
+        return [Failure(exc, None)], False
     kinds = {kind for kind, _ in entries}
     failures: list[Failure] = []
     hold = poll_timeout if kinds <= LONG_POLL_KINDS else min(poll_timeout, SHORT_HOLD)
+    held = False
     if TELEGRAM in kinds or not kinds or token_problem(TELEGRAM, env) is None:
-        failures += _pull(machine, env, transport, TELEGRAM, now, hold, purge, None)
+        failures += _pull(machine, env, transport, TELEGRAM, now, hold, purge, None, quiet)
+        held = hold > 0
     for kind in sorted(kinds - {TELEGRAM}):
         for chat_id in [chat for k, chat in entries if k == kind]:
-            failures += _pull(machine, env, transport, kind, now, 0, purge, [chat_id])
-    return failures
+            failures += _pull(machine, env, transport, kind, now, 0, purge, [chat_id], quiet)
+    return failures, held
 
 
 def _pull(
@@ -77,6 +88,7 @@ def _pull(
     hold: int,
     purge: bool,
     chats: list | None,
+    quiet: bool,
 ) -> list[Failure]:
     """Pull one channel kind (``chats`` of it only, when given); its failure is returned, never raised."""
     secret = None
@@ -84,7 +96,7 @@ def _pull(
         # Read afresh each round: a repaired .env or a new registration needs no restart.
         channel = channel_for(kind, env, transport)
         secret = channel.secret
-        cmd_pull(channel, machine, now, hold, purge, chats)
+        cmd_pull(channel, machine, now, hold, purge, chats, quiet)
     except Exception as exc:  # noqa: BLE001 - one channel's failure must not keep the others unread
         return [Failure(exc, secret)]
     return []
@@ -92,7 +104,7 @@ def _pull(
 
 def cmd_pull_once(machine: Machine, env: Mapping[str, str], transport: Transport, now: float) -> int:
     """Run one round and say its failures; return the exit code."""
-    failures = pull_round(machine, env, transport, now)
+    failures, _ = pull_round(machine, env, transport, now)
     for failure in failures:
         typed = not isinstance(failure.error, BugsError)
         print(failure.line(typed), file=sys.stderr)
@@ -122,7 +134,7 @@ def pull_loop(
     previous = signal.signal(signal.SIGTERM, stop)
     try:
         while True:
-            for failure in pull_round(machine, env, transport, wall()):
+            for failure in pull_round(machine, env, transport, wall())[0]:
                 print(failure.line(typed=True), file=sys.stderr)
             sys.stdout.flush()
             sleep(every)
@@ -144,7 +156,8 @@ def watch_loop(
 ) -> int:
     """Long-poll the channels until SIGINT or SIGTERM: a message is seen as it arrives.
 
-    Rounds chain with no sleep, the long-polled channel holding each request. A failed round (network,
+    Rounds chain with no sleep, the long-polled channel holding each request; when none was held (no Telegram read),
+    a clean round is followed by ``SHORT_HOLD`` s of sleep instead. A failed round (network,
     5xx, 409, 429) is logged and followed by the wait the platform asked for (``Retry-After``), else a
     backoff growing to ``BACKOFF_CEILING``, reset by the next success; it is never fatal. The 30-day
     purge runs about hourly. A signal interrupts the held request itself (the handler raises), so a stop
@@ -164,7 +177,7 @@ def watch_loop(
         while True:
             at = clock()
             purge = last_purge is None or at - last_purge >= PURGE_EVERY
-            failures = pull_round(machine, env, transport, wall(), poll_timeout, purge)
+            failures, held = pull_round(machine, env, transport, wall(), poll_timeout, purge, quiet=True)
             if purge and not failures:
                 last_purge = at
             if failures:
@@ -176,6 +189,9 @@ def watch_loop(
                 sleep(asked or backoff)
             else:
                 backoff = 0.0
+                if not held:
+                    sys.stdout.flush()
+                    sleep(SHORT_HOLD)  # no request was held (Slack only): the round itself would not pause
             sys.stdout.flush()
     except KeyboardInterrupt:
         print("bugs-bot: stopped")

@@ -410,3 +410,45 @@ def test_a_reply_in_the_thread_of_a_fixed_report_answers_its_check(bugs_home, sl
     after = reports_of(bugs_home, "sla")[report_id]
     assert after["answers"][0]["text"] == "c'est bon chez moi"
     assert "awaiting" not in after and after["status"] == "fixed"
+
+
+class SlackRounds:
+    """A Slack-only transport that stops a watch loop (SIGINT) at the ``conversations.history`` call after ``rounds``."""
+
+    def __init__(self, api: FakeSlack, rounds: int) -> None:
+        self.api, self.rounds = api, rounds
+
+    def __call__(self, url: str, payload: dict | None = None, timeout: float | None = None, headers: dict | None = None):
+        if "/conversations.history?" in url and len(self.api.of("conversations.history")) >= self.rounds:
+            raise KeyboardInterrupt
+        return self.api(url, payload, timeout, headers)
+
+
+def test_a_slack_only_watch_pauses_between_clean_rounds(bugs_home, slack_repo, tmp_path):
+    from bugs_bot.watch import SHORT_HOLD
+
+    env_file = tmp_path / "slack-only.env"
+    env_file.write_text(f"SLACK_BOT_TOKEN={SLACK_TOKEN}\n")
+    env = {"BUGS_BOT_ENV_FILE": str(env_file), "BUGS_BOT_HOME": str(bugs_home)}
+    slept: list[float] = []
+
+    code = cli.main(["pull", "--watch"], transport=SlackRounds(FakeSlack(), rounds=3), env=env, now=NOW, sleep=slept.append, clock=lambda: 0.0)
+
+    assert code == 0 and slept == [SHORT_HOLD] * 3  # nothing held the request: the loop waits instead
+
+
+def test_a_round_whose_telegram_read_was_held_adds_no_pause(tmp_path, bugs_home, slack_repo, env):
+    register(bugs_home, tmp_path / "repo-tg", "tele", GROUP_ID, "Tele Bugs")
+    slept: list[float] = []
+
+    cli.main(["pull", "--watch"], transport=Both(FakeTelegram(), FakeSlack(), rounds=3), env=env, now=NOW, sleep=slept.append, clock=lambda: 0.0)
+
+    assert slept == []
+
+
+def test_a_watch_on_a_slack_project_with_nothing_new_prints_nothing(tmp_path, bugs_home, slack_repo, env, capsys):
+    register(bugs_home, tmp_path / "repo-tg", "tele", GROUP_ID, "Tele Bugs")
+
+    cli.main(["pull", "--watch"], transport=Both(FakeTelegram(), FakeSlack(), rounds=3), env=env, now=NOW, sleep=_stop, clock=lambda: 0.0)
+
+    assert capsys.readouterr().out == "bugs-bot: stopped\n"
