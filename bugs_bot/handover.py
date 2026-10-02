@@ -61,3 +61,18 @@ def read_note(store: Store, now: float) -> str | None:
     )
     store.save_state(state)
     return text
+
+
+def last_archive(store: Store) -> Path | None:
+    """Return the newest archived note, or ``None`` when none was ever read.
+
+    It is looked up in the archive directory, not in ``state.json``: a successor that crashed
+    between the move and the state write left the note there and no record of it.
+    """
+
+    def order(path: Path) -> tuple[str, str, int]:
+        day, clock, *n = path.stem.split("-")  # <YYYYMMDD>-<HHMMSS>[-<n>]
+        return day, clock, int(n[0]) if n else 1
+
+    archives = list((store.home / "handover").glob("*.md"))
+    return max(archives, key=order) if archives else None

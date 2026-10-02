@@ -29,7 +29,7 @@ from bugs_bot.doctor import cmd_doctor, pull_processes
 from bugs_bot.errors import BugsError
 from bugs_bot.followup import cmd_escalated
 from bugs_bot.gate import cmd_gate
-from bugs_bot.handover import read_note, write_note
+from bugs_bot.handover import last_archive, read_note, write_note
 from bugs_bot.init import InitArgs, cmd_init, cmd_remove, repo_root
 from bugs_bot.people import cmd_backfill_authors, cmd_person, cmd_person_note
 from bugs_bot.project import find_project_file, load_project, resolve_project
@@ -178,7 +178,13 @@ def main(
             print(write_note(store, args.text, now))
         elif args.command == "handover":
             note = read_note(store, now)
-            print("no handover note" if note is None else note, end="" if note else "\n")
+            archive = last_archive(store) if note is None else None
+            if note is not None:
+                print(note, end="")
+            elif archive is not None:
+                print(f"no unread handover note; last archived: {archive}")
+            else:
+                print("no handover note")
         elif args.command == "gate":
             cmd_gate(project, args.set, args.window, args.tokens, args.measure, env)
         else:
