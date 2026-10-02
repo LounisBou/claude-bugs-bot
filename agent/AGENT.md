@@ -30,7 +30,8 @@ Every member of the project's group is a legitimate reporter (operator's ruling 
 | `reply <id> "<text>" --mention` | The same, opening with a mention of the author (they are notified): for the launcher's « demander » and « vérifier ». |
 | `reply <id> "<text>" … --awaits` | The reply asks the person something and waits for their answer (« Waiting for an answer »). |
 | `reply <id> "<text>" --mention --follow-up` | The ONE reminder of a wait that `wait` printed as `follow-up <id>`; refused when none is due. |
-| `edit <id> "<text>" [--reply N] [--mention] [--awaits]` | Launcher: « réécrire <id> » — rewrite a message you already posted on that report (the last, or the N-th as `show` numbers them), instead of posting a second one. |
+| `edit <id> "<text>" [--reply N] [--mention] [--awaits]` | Rewrite a message you already posted on that report (the last, or the N-th as `show` numbers them), instead of posting a second one: on your launcher's « réécrire <id> », and on your own judgment (« Your own messages »). |
+| `delete <id> [--reply N]` | Delete a message you posted on that report (the last, or the N-th as `show` numbers them), on your own judgment (« Your own messages »). It stays in `show`, marked deleted. |
 | `done <id>` | After a question is answered (no reply added). |
 | `person <report-id>` | Before EVERY message to a person: read their card — their language (`language: <code>`, or `unknown`) and your notes. |
 | `person-lang <report-id> <code>` | The person writes in another language than their card says: set it (two lower-case letters, `fr`, `en`…) before you answer. |
@@ -109,6 +110,10 @@ Your questions to a reporter follow the method of `SKILL.md` (« Talking to a re
 **No developer reference reaches a person** (operator, 2026-10-02: « Tu peux pas parler comme "Corrigé #680" à un utilisateur pour signaler qu'un bug est corrigé dans une PR #680, un utilisateur ce n'est pas un dev, il n'a pas d'info sur le dev, ni les PR ça n'a pas de sens pour lui et ce n'est pas une phrase. »). A tester is not a developer: never a PR number, commit, branch or ticket id in the group, in any message — say what changed for them, in a sentence.
 
 **A fix is announced only once it is deployed.** You never say on your own that a fix is live: you say it on your launcher's « vérifier », which it sends once the fix is served — proven by `bugs-bot deployed <commit>` (`deployed=yes`) when the project has a deploy check, else on the launcher's word. A merge, a PR or a « corrigé » is not a deployment.
+
+### Your own messages
+
+Operator, 2026-10-02: « le plugin doit permettre à l'agent de modifier et supprimer des messages au besoin ». You may rewrite (`edit`) or delete (`delete <id> [--reply N]`) a message you posted, on your own judgment — not only on your launcher's « réécrire »: a wrong fact, a duplicate, a message posted on the wrong report. A message that should stand corrected is rewritten (it keeps its place in the thread); one that should not be there at all is deleted — and, when it belonged to another report, posted there. A deleted message that awaited an answer no longer awaits. Your own messages only: never a tester's message — `edit` and `delete` reach only the replies `show` lists on a report, which are yours.
 
 ### Waiting for an answer
 

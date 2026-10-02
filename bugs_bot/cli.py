@@ -2,7 +2,7 @@
 
 Machine-wide: ``pull [--every S | --watch]``. Per project (``--project <p>``, else the project whose
 ``.bugs-bot.json`` is in the current directory or a parent): ``list``, ``show <id>``,
-``reply <id> "<text>" [--mention] [--awaits | --follow-up]``, ``edit <id> "<text>" [--reply N] [--mention] [--awaits]``, ``taken <id>``,
+``reply <id> "<text>" [--mention] [--awaits | --follow-up]``, ``edit <id> "<text>" [--reply N] [--mention] [--awaits]``, ``delete <id> [--reply N]``, ``taken <id>``,
 ``fixed <id>``, ``done <id>``; and for the project's agent session: ``wait``, ``triage <id> bug|question``,
 ``pending``, ``overdue``, ``escalated <id>``, ``post "<text>" [--mention <id>]``, ``backfill-authors``, ``person <ref>``,
 ``person-note <ref> "<text>"``, ``person-lang <ref> <code>``, ``agent-prompt --launcher "<name [ref]>" [--predecessor … --predecessor-tty …]``,
@@ -36,6 +36,7 @@ from bugs_bot.people import cmd_backfill_authors, cmd_person, cmd_person_lang, c
 from bugs_bot.project import find_project_file, load_project, resolve_project
 from bugs_bot.pull import cmd_pull, pull_loop, watch_loop
 from bugs_bot.reports import (
+    cmd_delete,
     cmd_done,
     cmd_edit,
     cmd_fixed,
@@ -199,6 +200,8 @@ def main(
             elif args.command == "reply":
                 follow_up = project.follow_up_hours if args.follow_up else None
                 cmd_reply(channel, store, chat_id, args.id, args.text, now, args.mention, args.awaits, follow_up)
+            elif args.command == "delete":
+                cmd_delete(channel, store, chat_id, args.id, now, args.reply)
             elif args.command == "edit":
                 cmd_edit(channel, store, chat_id, args.id, args.text, now, args.reply, args.mention, args.awaits)
             elif args.command == "post":

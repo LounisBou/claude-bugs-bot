@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from bugs_bot.channel import Channel, Mention
+from bugs_bot.channel import Channel, ChatId, Mention
 from bugs_bot.errors import BugsError
 from bugs_bot.followup import mark_awaiting, mark_reminded, require_due
 from bugs_bot.reactions import move_to, say_reaction_pending
@@ -47,7 +47,8 @@ def cmd_show(store: Store, report_id: str) -> None:
     for number, reply in enumerate(report["replies"], 1):
         edits = len(reply.get("edits", []))
         count = f" ({edits} edit{'s' if edits > 1 else ''})" if edits else ""
-        print(f"reply {number} {reply['date']}: {reply['text']}{count}")
+        gone = f" (deleted {reply['deleted']})" if reply.get("deleted") else ""
+        print(f"reply {number} {reply['date']}: {reply['text']}{count}{gone}")
 
 
 def mention_of(report: dict) -> Mention:
@@ -106,6 +107,24 @@ def cmd_reply(
     print(f"replied to {report_id}")
 
 
+def posted_reply(report: dict, number: int | None, verb: str) -> tuple[int, dict]:
+    """Return ``(number, reply)`` of the bot's ``number``-th reply on ``report`` (1-based; ``None``: the last).
+
+    Raises:
+        BugsError: If there is no such reply, or it has no ``message_id`` or is deleted: it cannot be ``verb``.
+    """
+    replies = report["replies"]
+    number = len(replies) if number is None else number
+    if not 1 <= number <= len(replies):
+        raise BugsError(f"no such reply: {report['id']} has {len(replies)} reply(ies), asked for {number}")
+    reply = replies[number - 1]
+    if not reply.get("message_id"):
+        raise BugsError(f"reply {number} of {report['id']} has no message_id: it cannot be {verb}")
+    if reply.get("deleted"):
+        raise BugsError(f"reply {number} of {report['id']} is already deleted ({reply['deleted']}): it cannot be {verb}")
+    return number, reply
+
+
 def cmd_edit(
     channel: Channel,
     store: Store,
@@ -124,16 +143,10 @@ def cmd_edit(
     Telegram's « message is not modified » is reported, not failed.
 
     Raises:
-        BugsError: On no such reply, a reply without ``message_id``, an empty text, or a Telegram error.
+        BugsError: On no such reply, a reply without ``message_id`` or deleted, an empty text, or a channel error.
     """
     path, report = load_report(store, report_id)
-    replies = report["replies"]
-    number = len(replies) if number is None else number
-    if not 1 <= number <= len(replies):
-        raise BugsError(f"no such reply: {report_id} has {len(replies)} reply(ies), asked for {number}")
-    reply = replies[number - 1]
-    if not reply.get("message_id"):
-        raise BugsError(f"reply {number} of {report_id} has no message_id: it cannot be edited")
+    number, reply = posted_reply(report, number, "edited")
     if not text.strip():
         raise BugsError("empty text: nothing to write")
     mention = mention_of(report) if tag else None
@@ -154,6 +167,28 @@ def cmd_edit(
     if awaits:
         mark_awaiting(path, report, number, now)
     print(f"edited reply {number} of {report_id}")
+
+
+def cmd_delete(
+    channel: Channel, store: Store, chat_id: ChatId, report_id: str, now: float, number: int | None = None
+) -> None:
+    """Delete a reply the bot posted on a report: the last one, or the ``number``-th (1-based, as ``show`` numbers them).
+
+    The reply stays in ``report.json``, marked ``deleted`` with the date: the record of what was said is
+    kept. A wait that pointed at it is lifted: a deleted question awaits no answer.
+
+    Raises:
+        BugsError: On no such reply, a reply without ``message_id`` or already deleted, or a channel error
+            (then nothing is marked).
+    """
+    path, report = load_report(store, report_id)
+    number, reply = posted_reply(report, number, "deleted")
+    channel.delete(report.get("chat_id", chat_id), reply["message_id"])
+    reply["deleted"] = datetime.fromtimestamp(now, timezone.utc).isoformat()
+    if (report.get("awaiting") or {}).get("reply") == number:
+        del report["awaiting"]
+    write_json(path / "report.json", report)
+    print(f"deleted reply {number} of {report_id}")
 
 
 def cmd_taken(channel: Channel, store: Store, chat_id: int, report_id: str) -> int:
