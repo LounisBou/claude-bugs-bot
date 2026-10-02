@@ -331,7 +331,8 @@ def test_person_shows_the_queued_questions(queued, run, capsys):
 
 
 @pytest.mark.parametrize("phrase", [
-    "One question per message, one subject per person at a time",
+    "One message carries one question, in its own sentence",
+    "One subject per person at a time.",
     "`ask <id>`",
     "A queued question that no longer needs asking (the subject moved on): `unask <id>`.",
     "queued <id>: <author> already awaits <other id>",
