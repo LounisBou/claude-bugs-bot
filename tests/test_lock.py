@@ -17,12 +17,16 @@ from samples import BASE_DATE, GROUP_ID
 from test_mention import STAMP, write_report
 
 from bugs_bot import people, pull, reports
+from bugs_bot.agent import cmd_wait
+from bugs_bot.answers import record_answer
 from bugs_bot.channel import Attachment, Author
 from bugs_bot.errors import BugsError
+from bugs_bot.followup import clear_answered, mark_awaiting
 from bugs_bot.people import record_language, update_card
 from bugs_bot.questions import queue_question
+from bugs_bot.reactions import retry_pending_reactions
 from bugs_bot.reports import cmd_done
-from bugs_bot.store import EMOJI_SEEN, Machine, Store, locked, update_report
+from bugs_bot.store import EMOJI_FIXED, EMOJI_SEEN, Machine, Store, locked, update_report
 
 REPORT = f"{STAMP}-5"
 
@@ -38,11 +42,19 @@ class Interleaving(FakeChannel):
         super().__init__()
         self.method, self.meanwhile = method, meanwhile
 
-    def react(self, chat_id, message_id, emoji):
-        super().react(chat_id, message_id, emoji)
-        if self.method == "react" and self.meanwhile:
+    def _then(self, method: str) -> None:
+        if self.method == method and self.meanwhile:
             meanwhile, self.meanwhile = self.meanwhile, None
             meanwhile()
+
+    def react(self, chat_id, message_id, emoji):
+        super().react(chat_id, message_id, emoji)
+        self._then("react")
+
+    def get_file(self, file_id):
+        data = super().get_file(file_id)
+        self._then("get_file")
+        return data
 
 
 # -- the defect seen on 2026-10-02 -------------------------------------------------------------
@@ -192,6 +204,99 @@ def test_the_purge_waits_for_an_update_in_progress(bound):
 
     assert not (bound / "inbox" / REPORT).exists(), "the update wrote the purged report back"
     assert got_through == [False], "the purge did not wait for the lock"
+
+
+# -- a re-check under the lock: what changed since the read stands ----------------------------
+
+
+def test_a_reaction_retried_while_the_agent_moves_the_status_keeps_the_new_one(bound, bugs_home):
+    # Pull retries the 👀; while it is on the wire, the agent marks the report fixed, which wants 👌.
+    write_report(bound, 5, author_id=7, status="seen", reaction={"wanted": EMOJI_SEEN, "applied": None, "error": None})
+    store = Store(bound)
+    channel = Interleaving("react", lambda: reports.cmd_fixed(FakeChannel(), store, GROUP_ID, REPORT, "abc1234", BASE_DATE))
+
+    retry_pending_reactions(channel, store, GROUP_ID)
+
+    after = report(bound)
+    assert after["status"] == "fixed"
+    assert after["reaction"] == {"wanted": EMOJI_FIXED, "applied": EMOJI_FIXED, "error": None}, "the stale 👀 was written over 👌"
+
+
+def test_a_wait_set_after_pull_read_the_report_is_not_cleared(bound, monkeypatch):
+    # Laura's message answers the wait Pull read; the agent, meanwhile, asks her again.
+    write_report(bound, 5, author_id=7, awaiting={"since": "2026-10-02T08:30:30+00:00", "reply": 1})
+    store = Store(bound)
+    read = store.reports
+    read_waits = []
+
+    def read_then_ask_again():
+        found = read()
+        read_waits.extend(rep.get("awaiting") for _, _, rep in found)
+        mark_awaiting(store, REPORT, 2, BASE_DATE + 120)
+        return found
+
+    monkeypatch.setattr(store, "reports", read_then_ask_again)
+
+    cleared = clear_answered(store, 7, "Laura", BASE_DATE + 60)
+
+    assert read_waits == [{"since": "2026-10-02T08:30:30+00:00", "reply": 1}], "Pull did not read the wait its message answers"
+    assert report(bound).get("awaiting", {}).get("reply") == 2, "the newer wait was cleared"
+    assert cleared == []
+
+
+def test_an_answer_recorded_while_show_prints_stays_unseen(bound, monkeypatch, capsys):
+    write_report(bound, 5, author_id=7, kind="bug")
+    store = Store(bound)
+    laura = fake_author(7, None, "Laura")
+    record_answer(FakeChannel(), store, GROUP_ID, inbound(GROUP_ID, 300, "iPhone SE", date=BASE_DATE + 30, author=laura, thread_of=5))
+    later = inbound(GROUP_ID, 301, "iOS 18", date=BASE_DATE + 40, author=laura, thread_of=5)
+    show = reports.show_answers
+
+    def pull_records_then_show(*args):
+        # show read the report with one answer; Pull records a second before it marks what it printed.
+        record_answer(FakeChannel(), store, GROUP_ID, later)
+        return show(*args)
+
+    monkeypatch.setattr(reports, "show_answers", pull_records_then_show)
+    reports.cmd_show(store, REPORT)
+    capsys.readouterr()
+
+    assert {answer["message_id"]: answer["seen"] for answer in report(bound)["answers"]} == {300: True, 301: False}, (
+        "the answer recorded meanwhile was marked seen"
+    )
+    cmd_wait(store, 0, 1, lambda _: None, lambda: 0.0, BASE_DATE + 60, 24)
+    assert capsys.readouterr().out == f"answer {REPORT}\n", "the answer show never printed was marked seen"
+
+
+def test_an_answer_delivered_again_while_its_image_downloads_is_recorded_once(bound):
+    write_report(bound, 5, author_id=7)
+    store = Store(bound)
+    answer = inbound(GROUP_ID, 300, "iPhone SE", date=BASE_DATE + 30, author=fake_author(7, None, "Laura"),
+                     thread_of=5, attachments=[Attachment(file_id="a1", ext=".jpg")])
+    channel = Interleaving("get_file", lambda: record_answer(FakeChannel(), store, GROUP_ID, answer))
+
+    record_answer(channel, store, GROUP_ID, answer)
+
+    assert [recorded["message_id"] for recorded in report(bound)["answers"]] == [300], "the answer was recorded twice"
+
+
+def test_the_agents_language_set_after_pull_read_the_card_is_kept(bound, monkeypatch, capsys):
+    # Pull sees Laura for the first time (no language yet); the agent, meanwhile, sets hers to English.
+    store = Store(bound)
+    read = people.load_person
+    agent_sets = [lambda: people.cmd_person_lang(store, "7", "en")]
+
+    def read_then_agent_sets(*args):
+        card = read(*args)
+        if agent_sets:  # once: the agent's own update reads the card too
+            agent_sets.pop()()
+        return card
+
+    monkeypatch.setattr(people, "load_person", read_then_agent_sets)
+    record_language(store, Author(id=7, username=None, name="Laura", language="fr-FR", is_bot=False))
+    capsys.readouterr()
+
+    assert json.loads((bound / "people" / "7.json").read_text())["language"] == "en", "Pull overwrote the agent's language"
 
 
 # -- the lock itself ---------------------------------------------------------------------------
