@@ -92,21 +92,37 @@ def purge_old_done(store: Store, now: float) -> None:
             shutil.rmtree(path)
 
 
-def follow_migrations(machine: Machine, entries: dict[int, Entry], updates: list[dict]) -> None:
+def follow_migrations(machine: Machine, entries: dict[int, Entry], updates: list[dict]) -> dict[int, int]:
     """Re-register the projects whose group was promoted to a supergroup (it gets a new chat id).
 
-    ``entries`` is updated in place, the registry and the project file are rewritten.
+    ``entries`` is updated in place, the project file and then the registry are rewritten: a
+    failure between the two is retried by the next pull (the batch is delivered again) and finds
+    the file already done.
+
+    Returns:
+        ``{old chat id: new chat id}`` for every migration in ``updates``, whether or not its
+        project is still registered under the old id (a redelivered batch finds it already moved):
+        messages sent before the promotion in the same batch still carry the old id.
+
+    Raises:
+        BugsError: If a project file or the registry cannot be rewritten.
     """
+    aliases: dict[int, int] = {}
     for update in updates:
         msg = update.get("message") or {}
         old, new = (msg.get("chat") or {}).get("id"), msg.get("migrate_to_chat_id")
-        if not new or old not in entries:
+        if not new or old is None:
             continue
-        entry = entries.pop(old)
-        entries[new] = entry
-        machine.registry.add(new, entry.project, entry.repo)
+        aliases[old] = new
+        if old not in entries:
+            continue
+        entry = entries[old]
         rebind_chat(entry.repo / PROJECT_FILE, new)
+        machine.registry.add(new, entry.project, entry.repo)
+        del entries[old]
+        entries[new] = entry
         print(f"bugs-bot: group migrated, project {entry.project} rebound to chat {new}")
+    return aliases
 
 
 def cmd_pull(channel: Channel | None, machine: Machine, now: float, poll_timeout: int = 0, purge: bool = True) -> None:
@@ -133,7 +149,7 @@ def cmd_pull(channel: Channel | None, machine: Machine, now: float, poll_timeout
         return
     assert channel is not None
     updates = channel.get_updates(machine.load_offset(), poll_timeout, ["message"])
-    follow_migrations(machine, entries, updates)
+    aliases = follow_migrations(machine, entries, updates)
     for chat_id, chat in chats_seen(updates).items():
         if chat_id not in entries:
             machine.note_unregistered(chat, now)
@@ -142,6 +158,7 @@ def cmd_pull(channel: Channel | None, machine: Machine, now: float, poll_timeout
     for update in updates:
         msg = update.get("message") or {}
         chat_id = (msg.get("chat") or {}).get("id")
+        chat_id = aliases.get(chat_id, chat_id)
         if chat_id in entries and has_content(msg):
             kept.setdefault(chat_id, []).append(msg)
     created, failures = [], []

@@ -282,6 +282,115 @@ def test_the_registry_and_the_project_file_follow_a_migrated_chat(run, bound, tm
     assert Machine(bound.parent).unregistered() == {}
 
 
+def migrating_batch(*first: dict) -> list[dict]:
+    """Return ``first`` followed by the service message promoting the demo group to FAMILY_ID."""
+    promoted = message(99, 90, chat_type="group")
+    promoted["message"]["migrate_to_chat_id"] = FAMILY_ID
+    return [*first, promoted]
+
+
+def test_a_report_sharing_a_batch_with_its_groups_migration_is_written(run, bound, capsys):
+    tg = FakeTelegram(migrating_batch(message(10, 1, text="avant la migration", chat_type="group")))
+
+    assert run("pull", transport=tg) == 0
+
+    [rep] = reports(bound)
+    assert report_json(rep)["text"] == "avant la migration"
+    assert read_offset(bound) == 100
+    # the old id is dead, it is neither dropped as unregistered nor offered as a new group
+    assert Machine(bound.parent).unregistered() == {}
+    assert "unregistered" not in capsys.readouterr().err
+
+
+def test_a_batch_redelivered_after_its_migration_was_followed_still_lands_its_report(run, bound):
+    tg = FakeTelegram(migrating_batch(message(10, 1, caption="une image", photo="p1", chat_type="group")))
+    tg.fail_download = True
+    assert run("pull", transport=tg) != 0
+    assert read_offset(bound) is None
+
+    tg.fail_download = False
+    assert run("pull", transport=tg) == 0
+
+    [rep] = reports(bound)
+    assert report_json(rep)["images"] == ["1.jpg"] and (rep / "1.jpg").exists()
+    assert read_offset(bound) == 100
+    assert Machine(bound.parent).unregistered() == {}
+
+
+# -- the migration is written project file first, registry after --------------------------------
+
+
+def test_a_project_file_that_cannot_be_rebound_fails_the_pull_and_leaves_the_registry_alone(run, bound, tmp_path, capsys):
+    path = tmp_path / "repo-demo" / PROJECT_FILE
+    path.write_text("{nope")
+    tg = FakeTelegram(migrating_batch(message(10, 1, text="x", chat_type="group")))
+
+    assert run("pull", transport=tg) == 1
+
+    captured = capsys.readouterr()
+    assert str(path) in captured.err
+    assert "rebound" not in captured.out
+    assert set(Registry(bound.parent / "projects.json").entries()) == {GROUP_ID}
+    assert read_offset(bound) is None
+
+
+def test_a_project_file_that_cannot_be_written_fails_the_pull_and_leaves_the_registry_alone(
+    run, bound, tmp_path, capsys, monkeypatch
+):
+    def refuse(path, data):
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr("bugs_bot.project.write_json", refuse)
+    tg = FakeTelegram(migrating_batch(message(10, 1, text="x", chat_type="group")))
+
+    assert run("pull", transport=tg) == 1
+
+    captured = capsys.readouterr()
+    assert str(tmp_path / "repo-demo" / PROJECT_FILE) in captured.err
+    assert "rebound" not in captured.out
+    assert set(Registry(bound.parent / "projects.json").entries()) == {GROUP_ID}
+    assert read_offset(bound) is None
+
+
+def test_a_followed_migration_is_idempotent_when_the_pull_is_retried(run, bound, tmp_path, capsys):
+    path = tmp_path / "repo-demo" / PROJECT_FILE
+    good = path.read_text()
+    path.write_text("{nope")
+    tg = FakeTelegram(migrating_batch(message(10, 1, text="x", chat_type="group")))
+    assert run("pull", transport=tg) == 1
+    path.write_text(good)
+
+    assert run("pull", transport=tg) == 0
+
+    assert set(Registry(bound.parent / "projects.json").entries()) == {FAMILY_ID}
+    assert json.loads(path.read_text())["group"]["chat_id"] == FAMILY_ID
+    assert "rebound" in capsys.readouterr().out
+
+
+# -- a report written before a migration keeps the chat id it was written under -----------------
+
+
+def test_commands_on_an_older_report_target_the_chat_the_report_was_written_in(run, two, bound):
+    # the project's group moved on, this report still carries the id of the old chat
+    write_report(bound, "20261002-083000-1", "avant", OTHER_GROUP_ID)
+    for argv in (("taken",), ("fixed",), ("reply", "ok")):
+        tg = FakeTelegram()
+        assert run(argv[0], "20261002-083000-1", *argv[1:], transport=tg) == 0
+        assert [c["chat_id"] for c in tg.reactions + tg.sent] == [OTHER_GROUP_ID]
+
+
+def test_a_pending_reaction_of_an_older_report_is_retried_in_its_own_chat(run, two, bound):
+    write_report(bound, "20261002-083000-1", "avant", OTHER_GROUP_ID)
+    path = bound / "inbox" / "20261002-083000-1" / "report.json"
+    path.write_text(json.dumps(json.loads(path.read_text()) | {"reaction": {"wanted": "👀", "applied": None, "error": None}}))
+    tg = FakeTelegram()
+
+    assert run("pull", transport=tg) == 0
+
+    assert [r["chat_id"] for r in tg.reactions] == [OTHER_GROUP_ID]
+    assert json.loads(path.read_text())["reaction"]["applied"] == "👀"
+
+
 PROJECT_COMMANDS = [
     ["list"], ["show", "i"], ["reply", "i", "t"], ["edit", "i", "t"], ["fixed", "i"], ["taken", "i"], ["done", "i"],
     ["triage", "i", "bug"], ["wait"], ["pending"], ["post", "t"], ["backfill-authors"], ["agent-prompt", "--launcher", "l"],

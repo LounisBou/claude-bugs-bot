@@ -78,7 +78,7 @@ def set_reaction(channel: Channel, chat_id: int, report: dict, emoji: str) -> No
     state = report.setdefault("reaction", {"wanted": emoji, "applied": None, "error": None})
     state["wanted"] = emoji
     try:
-        channel.react(chat_id, report["message_ids"][0], emoji)
+        channel.react(report.get("chat_id", chat_id), report["message_ids"][0], emoji)
     except BugsError as exc:
         state["error"] = str(exc)
         # The operator deleted the message: no retry can ever land, stop trying.
@@ -89,13 +89,14 @@ def set_reaction(channel: Channel, chat_id: int, report: dict, emoji: str) -> No
 
 
 def retry_pending_reactions(channel: Channel, store: Store, chat_id: int) -> None:
-    """Land every reaction that is wanted but not applied yet (that chat only).
+    """Land every reaction that is wanted but not applied yet, in the chat each report was written in.
 
+    ``chat_id`` is the project's current chat, used for a report that records none.
     Failures are reported on stderr and recorded; they do not fail the pull.
     """
     for report_id, path, report in store.reports():
         reaction = report.get("reaction")
-        if report.get("chat_id") != chat_id or not reaction or reaction.get("gone"):
+        if not reaction or reaction.get("gone"):
             continue
         if reaction["wanted"] == reaction["applied"]:
             continue
@@ -110,7 +111,7 @@ def send_reply(
     channel: Channel, chat_id: int, path: Path, report: dict, text: str, now: float, mention: Mention | None = None
 ) -> None:
     """Post ``text`` threaded on the report's first message and record it in ``report.json``."""
-    sent = channel.send(chat_id, text, report["message_ids"][0], mention)
+    sent = channel.send(report.get("chat_id", chat_id), text, report["message_ids"][0], mention)
     report["replies"].append(
         {"date": datetime.fromtimestamp(now, timezone.utc).isoformat(), "text": sent["text"], "message_id": sent["message_id"]}
     )
@@ -156,7 +157,7 @@ def cmd_edit(
         raise BugsError("empty text: nothing to write")
     mention = mention_of(report) if tag else None
     try:
-        edited = channel.edit(chat_id, reply["message_id"], text, mention)
+        edited = channel.edit(report.get("chat_id", chat_id), reply["message_id"], text, mention)
     except BugsError as exc:
         if "message is not modified" not in str(exc):
             raise
@@ -192,7 +193,7 @@ def move_to(
     except BugsError as exc:
         failure = exc
     write_json(path / "report.json", report)
-    return chat_id, path, report, failure
+    return report["chat_id"], path, report, failure
 
 
 def say_reaction_pending(channel: Channel, failure: BugsError | None) -> int:

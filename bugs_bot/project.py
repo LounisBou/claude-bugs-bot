@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 import re
-import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -144,14 +143,15 @@ def dump_project(project: Project) -> dict:
 def rebind_chat(path: Path, chat_id: int) -> None:
     """Write a new chat id into a project file, after the group was promoted to a supergroup.
 
-    A file that cannot be loaded is left alone and said on stderr: the registry already routes.
+    Raises:
+        BugsError: If the file cannot be loaded or written (the message names it): the caller
+            must not go on to the registry, which would then route where the file does not say.
     """
+    project = load_project(path)
     try:
-        project = load_project(path)
-    except BugsError as exc:
-        print(f"bugs-bot: {path} not updated to chat {chat_id}: {exc}", file=sys.stderr)
-        return
-    write_json(path, dump_project(replace(project, chat_id=chat_id)))
+        write_json(path, dump_project(replace(project, chat_id=chat_id)))
+    except OSError as exc:
+        raise BugsError(f"cannot write {path}: {exc.strerror or exc}") from None
 
 
 def resolve_project(name: str | None, cwd: Path, registry: Registry) -> Project:
