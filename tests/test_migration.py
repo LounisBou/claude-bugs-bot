@@ -273,8 +273,15 @@ def test_a_repository_without_a_project_file_is_refused(migrate, tmp_path):
     assert migrate(repo=empty) == 1
 
 
-def test_a_bad_project_id_is_refused(migrate):
-    assert migrate(project="../x") == 1
+@pytest.mark.parametrize("project", ["../x", "Demo", "a b", "demo/.."])
+def test_a_bad_project_id_is_refused(migrate, repo, project):
+    (repo / ".bugs-bot.json").write_text(
+        json.dumps({"project": project, "group": {"chat_id": GROUP_ID, "title": "x"}, "agent_title": "A"})
+    )
+
+    assert migrate(project=project) == 1
+
+    assert not migrate.target.exists()
 
 
 def test_the_script_accepts_the_project_file_that_init_writes(migrate, tmp_path):
@@ -390,3 +397,32 @@ def test_a_non_utf8_env_file_is_refused_without_printing_the_token(migrate, lega
     assert "Traceback" not in out.err
     assert TOKEN not in out.out + out.err
     assert not migrate.target.exists()
+
+
+# --- behaviours pinned ------------------------------------------------------------------------------
+
+
+def test_a_project_file_without_a_group_chat_id_is_refused(migrate, repo):
+    (repo / ".bugs-bot.json").write_text(json.dumps({"project": "demo", "group": {"title": "x"}, "agent_title": "A"}))
+
+    assert migrate() == 1
+
+    assert not migrate.target.exists()
+
+
+@pytest.mark.parametrize("line", ["TELEGRAM_BOT_TOKEN=", "TELEGRAM_BOT_TOKEN=''", 'TELEGRAM_BOT_TOKEN=""'])
+def test_an_empty_token_is_refused(migrate, legacy_env, line):
+    legacy_env.write_text(line + "\n")
+
+    assert migrate() == 1
+
+    assert not migrate.target.exists()
+
+
+@pytest.mark.parametrize("quote", ["'", '"'])
+def test_the_token_line_is_kept_exactly_when_quoted(migrate, legacy_env, quote):
+    legacy_env.write_text(f"TELEGRAM_BOT_TOKEN={quote}{TOKEN}{quote}\n")
+
+    assert migrate() == 0
+
+    assert (migrate.target / ".env").read_text() == f"TELEGRAM_BOT_TOKEN={quote}{TOKEN}{quote}\n"
