@@ -22,6 +22,9 @@ MIN_PYTHON = (3, 10)
 ALLOW_RULE = "Bash(bugs-bot:*)"
 PERMISSIONS_LINE = f"/permissions → Allow → {ALLOW_RULE}"
 SETTINGS_FILES = ("settings.json", "settings.local.json")
+# Interpreter options that take the next word as their argument (``-X dev``), and those that replace the script.
+OPTIONS_WITH_ARGUMENT = {"-X", "-W"}
+PROGRAM_OPTIONS = {"-c", "-m"}
 
 # What every session runs as ``bugs-bot``: the newest installed version of the plugin's CLI. The newest
 # directory is chosen first and only then checked for its CLI, so a half-removed version is refused
@@ -55,10 +58,10 @@ def pull_processes(ps_output: str) -> list[int]:
         words = command.split()
         if not pid.isdigit() or not words:
             continue
-        if Path(words[0]).name.startswith("python"):
+        if Path(words[0]).name.lower().startswith("python"):  # Homebrew's is .../Python.app/Contents/MacOS/Python
             words = words[1:]
-            while words and words[0].startswith("-"):  # interpreter options such as -u
-                words = words[1:]
+            while words and words[0].startswith("-") and words[0] not in PROGRAM_OPTIONS:  # interpreter options such as -u
+                words = words[2:] if words[0] in OPTIONS_WITH_ARGUMENT else words[1:]
         if words and Path(words[0]).name == "bugs-bot" and words[1:2] == ["pull"] and "--watch" in words[2:]:
             pids.append(int(pid))
     return pids
