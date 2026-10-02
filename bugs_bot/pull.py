@@ -14,7 +14,7 @@ from bugs_bot.followup import clear_answered
 from bugs_bot.people import record_language
 from bugs_bot.reactions import retry_pending_reactions
 from bugs_bot.project import PROJECT_FILE, rebind_chat
-from bugs_bot.store import CLOSED_STATUSES, EMOJI_SEEN, OPEN_STATUSES, Machine, Store, write_json
+from bugs_bot.store import CLOSED_STATUSES, EMOJI_SEEN, Machine, Store, write_json
 from bugs_bot.registry import Entry
 
 # Long polling (`pull --watch`): the channel holds a request until a message arrives or POLL_TIMEOUT seconds pass.
@@ -125,14 +125,17 @@ def follow_migrations(machine: Machine, kind: str, entries: dict[ChatId, Entry],
 
 
 def open_threads(machine: Machine, entries: dict[ChatId, Entry]) -> dict[ChatId, list[MessageId]]:
-    """Return, per chat, the first message of each open report: the threads a platform that threads reads replies in."""
+    """Return, per chat, the first message of each report not ``done``: the threads a platform that threads reads replies in.
+
+    A ``fixed`` report is still followed: the person is asked to check the fix there, and answers there.
+    """
     threads: dict[ChatId, list[MessageId]] = {}
     for chat_id, entry in entries.items():
         reports = machine.project_store(entry.project).reports()
         threads[chat_id] = [
             report["message_ids"][0]
             for _, _, report in reports
-            if report["status"] in OPEN_STATUSES and report.get("chat_id", chat_id) == chat_id and report.get("message_ids")
+            if report["status"] != "done" and report.get("chat_id", chat_id) == chat_id and report.get("message_ids")
         ]
     return threads
 

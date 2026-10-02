@@ -393,3 +393,20 @@ def test_an_unreadable_registry_fails_the_round_never_the_watch(bugs_home, env, 
 
     assert code == 0 and slept == [5, 10]
     assert "cannot read the registry" in capsys.readouterr().err
+
+
+def test_a_reply_in_the_thread_of_a_fixed_report_answers_its_check(bugs_home, slack_repo, env):
+    # « vérifier » is asked once the report is fixed: its thread is still read.
+    api = FakeSlack()
+    api.history[CHANNEL] = [msg(ts(1), "le lecteur plante")]
+    assert cli.main(["pull"], transport=Both(FakeTelegram(), api), env=env, now=NOW) == 0
+    (report_id, report), = reports_of(bugs_home, "sla").items()
+    path = bugs_home / "sla" / "inbox" / report_id / "report.json"
+    path.write_text(json.dumps(report | {"status": "fixed", "awaiting": {"since": "2026-10-02T08:40:00+00:00", "reply": 1}}))
+    api.replies[(CHANNEL, ts(1))] = [msg(ts(3700), "c'est bon chez moi", thread_ts=ts(1))]
+
+    assert cli.main(["pull"], transport=Both(FakeTelegram(), api), env=env, now=NOW + 60) == 0
+
+    after = reports_of(bugs_home, "sla")[report_id]
+    assert after["answers"][0]["text"] == "c'est bon chez moi"
+    assert "awaiting" not in after and after["status"] == "fixed"
