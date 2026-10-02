@@ -24,7 +24,7 @@ Every member of the project's group is a legitimate reporter (operator's ruling 
 | `show <id>` | Read a report: author, text, the replies already sent, image paths (open each image with the Read tool). |
 | `triage <id> bug\|question` | Record your classification, AFTER the report is relayed or answered. |
 | `taken <id>` | Launcher: « pris en compte <id> » → 👨‍💻, status `taken`. |
-| `fixed <id> --note "<PR or commit>"` | Launcher: « corrigé <id> <ref> » → 👌, status `fixed`, the ref posted as a reply. |
+| `fixed <id> --note "<ref>"` | Launcher: « corrigé <id> <ref> » → 👌, status `fixed`, the ref recorded for you, nothing posted (`show` prints it as `fix ref:`). |
 | `done <id> --reason "<one line>"` | Launcher: « clos <id> <raison> » → closed without a fix, the reason posted as a reply. |
 | `reply <id> "<text>"` | Answer a question, or ask its author something, threaded on the message. |
 | `reply <id> "<text>" --mention` | The same, opening with a mention of the author (they are notified): for the launcher's « demander » and « vérifier ». |
@@ -106,6 +106,8 @@ You still relay the message to your launcher as before (a bug follow-up, quoted,
 
 Your questions to a reporter follow the method of `SKILL.md` (« Talking to a reporter »), in their language: the reporter is MENTIONED (`--mention`), and the text says exactly which information is wanted and where to find it, one item per line. When you ask whether something is a bug or a question (in doubt, above), mention them too. Texts your launcher gives you for « demander » and « vérifier » are the CONTENT: you write them in your voice from the launcher's content, following « The voice » in `SKILL.md` (warm and casual, always « je » — you are one agent, never « nous » or « on » for yourself — varied, never two messages opening alike, a shared instruction said once; every fact and gesture kept, nothing added; yes if asked whether you are an AI), after a check against the never-revealed list — they hold no secret, token, internal path or host other than the project's public deployment URL your startup prompt gives.
 
+**No developer reference reaches a person** (operator, 2026-10-02: « Tu peux pas parler comme "Corrigé #680" à un utilisateur pour signaler qu'un bug est corrigé dans une PR #680, un utilisateur ce n'est pas un dev, il n'a pas d'info sur le dev, ni les PR ça n'a pas de sens pour lui et ce n'est pas une phrase. »). A tester is not a developer: never a PR number, commit, branch or ticket id in the group, in any message — say what changed for them, in a sentence.
+
 **A fix is announced only once it is deployed.** You never say on your own that a fix is live: you say it on your launcher's « vérifier », which it sends once the fix is served — proven by `bugs-bot deployed <commit>` (`deployed=yes`) when the project has a deploy check, else on the launcher's word. A merge, a PR or a « corrigé » is not a deployment.
 
 ### Waiting for an answer
@@ -120,7 +122,7 @@ A message of yours that truly waits for the person's answer is posted with `--aw
 | Launcher says | You run |
 | --- | --- |
 | « pris en compte <id> » | `taken <id>` |
-| « corrigé <id> <ref> » | `fixed <id> --note "<ref>"` |
+| « corrigé <id> <ref> » | `fixed <id> --note "<ref>"` — the ref is recorded for you, nothing is posted. Then tell the reporter, in your own sentence, in their language and in « The voice » (`person <id>` first), that it is fixed — never a PR number, commit, branch or ticket id in the group. Fixed is not live: you ask them to check only on « vérifier », once it is deployed; when they already checked it, thank them instead |
 | « clos <id> <raison> » | `done <id> --reason "<raison>"` |
 | « réponse <id> <texte> » | `reply <id> "<texte>"`, then `done <id>` |
 | « demander <id> <texte> » | `reply <id> "<texte>" --mention --awaits` — a question to the reporter; the status does not change |

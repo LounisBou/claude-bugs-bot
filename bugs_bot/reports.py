@@ -40,6 +40,8 @@ def cmd_show(store: Store, report_id: str) -> None:
         f"  kind: {report.get('kind') or 'untriaged'}"
     )
     print(report["text"] or "(no text)")
+    if report.get("fix_ref"):
+        print(f"fix ref: {report['fix_ref']}")
     for name in report["images"]:
         print(f"  {(path / name).resolve()}")
     for number, reply in enumerate(report["replies"], 1):
@@ -172,17 +174,19 @@ def cmd_taken(channel: Channel, store: Store, chat_id: int, report_id: str) -> i
 
 
 def cmd_fixed(channel: Channel, store: Store, chat_id: int, report_id: str, note: str | None, now: float) -> int:
-    """Mark a report fixed: status, 👌 reaction, and an optional note posted as a reply.
+    """Mark a report fixed: status, 👌 reaction, and the fix's ref (``note``) recorded as ``fix_ref``.
 
-    The status is saved before any network call, so a refused reaction leaves the
-    report fixed and ``pull`` retries the reaction.
+    Nothing is posted: a PR number or a commit means nothing to a tester (spec § 3.5); the agent
+    tells them in its own words, and ``show`` gives it the ref. The status is saved before any
+    network call, so a refused reaction leaves the report fixed and ``pull`` retries the reaction.
 
     Returns:
         1 if the reaction could not be set (it stays pending), else 0.
     """
     _, path, report, failure = move_to(channel, store, chat_id, report_id, "fixed", EMOJI_FIXED)
     if note:
-        send_reply(channel, chat_id, path, report, f"Corrigé : {note}", now)
+        report["fix_ref"] = note
+        write_json(path / "report.json", report)
     print(f"fixed {report_id}")
     return say_reaction_pending(channel, failure)
 
