@@ -9,8 +9,8 @@ which would merge two messages of the same second.
 from __future__ import annotations
 
 import mimetypes
-from dataclasses import replace
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any

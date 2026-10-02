@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from bugs_bot.answers import show_answers
-from bugs_bot.edits import show_edits
 from bugs_bot.channel import Channel, ChatId, Mention
+from bugs_bot.edits import show_edits
 from bugs_bot.errors import BugsError
 from bugs_bot.followup import mark_awaiting, mark_reminded, require_due
 from bugs_bot.images import check_images, post, record_sent
@@ -36,7 +36,7 @@ def cmd_list(store: Store) -> None:
 
 
 def cmd_show(store: Store, report_id: str) -> None:
-    """Print a report's text and the absolute paths of its images."""
+    """Print a report's text, its images' absolute paths, its replies and answers, and its edits, which it marks seen."""
     path = store.report_dir(report_id)
     report = json.loads((path / "report.json").read_text())
     print(
