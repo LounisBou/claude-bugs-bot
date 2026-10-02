@@ -30,6 +30,18 @@ _KINDS = {
 KINDS = tuple(_KINDS)
 
 
+class _KeepCredentialHome(urllib.request.HTTPRedirectHandler):
+    """Follow no redirect of a request carrying ``Authorization``: it would take the credential to another host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN201 - urllib's signature
+        if req.has_header("Authorization"):
+            return None  # urllib then raises the 30x as an HTTPError, returned below like any other status
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_KeepCredentialHome)
+
+
 def http_transport(
     url: str, payload: dict | None = None, timeout: float | None = None, headers: Mapping[str, str] | None = None
 ) -> tuple[int, bytes]:
@@ -42,13 +54,14 @@ def http_transport(
         headers: Extra request headers (a platform's ``Authorization``).
 
     Returns:
-        ``(status, body)``; the body carries the response headers (``Body.headers``).
+        ``(status, body)``; the body carries the response headers (``Body.headers``). A redirect of a request
+        carrying ``Authorization`` is not followed: its 30x status is returned.
     """
     data = None if payload is None else json.dumps(payload).encode()
     sent = {} if payload is None else {"Content-Type": "application/json"}
     request = urllib.request.Request(url, data=data, headers={**sent, **(headers or {})})
     try:
-        with urllib.request.urlopen(request, timeout=timeout or HTTP_TIMEOUT) as resp:  # noqa: S310 - https or loopback, see each channel's API root
+        with _OPENER.open(request, timeout=timeout or HTTP_TIMEOUT) as resp:  # noqa: S310 - https or loopback, see each channel's API root
             return resp.status, Body(resp.read(), dict(resp.headers.items()))
     except urllib.error.HTTPError as exc:
         # A platform explains its refusals in the body, and how long to wait in the headers: keep both.

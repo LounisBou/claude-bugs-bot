@@ -453,3 +453,86 @@ def test_a_rate_limited_users_info_still_fails_the_poll(slack, api):
 
     with pytest.raises(RateLimited):
         slack.poll(None, [CHANNEL], 0)
+
+
+# -- redirects ------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def redirecting():
+    """A loopback server answering 302 to ``/file``, toward ``/elsewhere``; every path asked recorded."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    asked: list[tuple[str, str | None]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server's name
+            asked.append((self.path, self.headers.get("Authorization")))
+            if self.path == "/file":
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{self.server.server_port}/elsewhere")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"landed")
+
+        def log_message(self, *_):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_port}", asked
+    server.shutdown()
+    server.server_close()
+    thread.join()
+
+
+def test_the_transport_follows_no_redirect_with_a_credential_in_the_headers(redirecting):
+    from bugs_bot.channels import http_transport
+
+    root, asked = redirecting
+
+    status, _ = http_transport(f"{root}/file", None, None, AUTH)
+
+    assert status == 302 and asked == [("/file", f"Bearer {SLACK_TOKEN}")]
+
+
+def test_the_transport_still_follows_a_redirect_of_a_request_without_one(redirecting):
+    from bugs_bot.channels import http_transport
+
+    root, asked = redirecting
+
+    assert http_transport(f"{root}/file") == (200, b"landed") and [path for path, _ in asked] == ["/file", "/elsewhere"]
+
+
+def test_a_redirected_download_is_an_error_without_the_token(redirecting):
+    from bugs_bot.channels import http_transport
+
+    root, asked = redirecting
+    slack = SlackChannel(SLACK_TOKEN, http_transport, root)
+
+    with pytest.raises(BugsError) as caught:
+        slack.get_file(f"{root}/file")
+
+    assert "download of a Slack file: HTTP 302" in str(caught.value) and SLACK_TOKEN not in str(caught.value)
+    assert [path for path, _ in asked] == ["/file"]
+
+
+def test_a_redirect_answered_by_the_transport_is_never_followed_by_the_channel(api):
+    calls = []
+
+    def transport(url, payload=None, timeout=None, headers=None):
+        calls.append(url)
+        return 302, Body(b"", {"Location": "https://elsewhere.example/x"})
+
+    slack = SlackChannel(SLACK_TOKEN, transport, ROOT)
+    with pytest.raises(BugsError) as caught:
+        slack.get_file("https://files.slack.com/F1/a.png")
+
+    assert calls == ["https://files.slack.com/F1/a.png"] and SLACK_TOKEN not in str(caught.value)
+    with pytest.raises(BugsError, match=r"^chat\.postMessage: HTTP 302") as posted:
+        slack.send(CHANNEL, "x")
+    assert SLACK_TOKEN not in str(posted.value)
