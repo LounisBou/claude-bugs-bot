@@ -166,7 +166,7 @@ def main(
         elif args.command == "pending":
             cmd_pending(store)
         elif args.command == "agent-prompt":
-            cmd_agent_prompt(store, args.launcher, now, args.predecessor, args.predecessor_tty)
+            print(cmd_agent_prompt(store, project, args.launcher, now, args.predecessor, args.predecessor_tty))
         elif args.command == "handover" and args.action == "write":
             print(write_note(store, args.text, now))
         elif args.command == "handover":

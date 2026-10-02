@@ -125,10 +125,10 @@ def test_successor_prompt_is_the_plain_one_without_a_predecessor(run, bound, hom
     assert "predecessor" not in prompt.lower()
 
 
-def test_agent_json_records_the_predecessor(run, bound, home):
+def test_the_agent_record_keeps_the_predecessor(run, bound, home):
     run("agent-prompt", "--launcher", LAUNCHER, "--predecessor", PREDECESSOR, "--predecessor-tty", TTY)
 
-    record = json.loads((home / "agent.json").read_text())
+    record = json.loads((home / "state.json").read_text())["agent"]
     assert record["launcher"] == LAUNCHER
     assert record["predecessor"] == PREDECESSOR and record["predecessor_tty"] == TTY
 
@@ -138,7 +138,7 @@ def test_a_plain_start_clears_a_stale_predecessor(run, bound, home):
 
     run("agent-prompt", "--launcher", LAUNCHER)
 
-    assert "predecessor" not in json.loads((home / "agent.json").read_text())
+    assert "predecessor" not in json.loads((home / "state.json").read_text())["agent"]
 
 
 @pytest.mark.parametrize(
@@ -154,7 +154,7 @@ def test_a_plain_start_clears_a_stale_predecessor(run, bound, home):
 def test_a_half_given_or_malformed_predecessor_is_refused(run, bound, home, extra):
     assert run("agent-prompt", "--launcher", LAUNCHER, *extra) != 0
 
-    assert not (home / "agent.json").exists()
+    assert not (home / "state.json").exists()
 
 
 # -- AGENT.md carries both sides of the protocol ----------------------------------------------
