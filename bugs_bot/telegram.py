@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import re
 import urllib.error
 import urllib.request
@@ -15,7 +16,8 @@ from bugs_bot.channel import Mention, Transport
 from bugs_bot.errors import BugsError
 from bugs_bot.store import bugs_home
 
-API_ROOT = "https://api.telegram.org"
+# BUGS_BOT_API_ROOT points the end-to-end run at a local fake; production never sets it.
+API_ROOT = os.environ.get("BUGS_BOT_API_ROOT") or "https://api.telegram.org"
 HTTP_TIMEOUT = 30
 # A held getUpdates request is read this much longer than Telegram holds it, so it is never cut.
 POLL_READ_MARGIN = 10
