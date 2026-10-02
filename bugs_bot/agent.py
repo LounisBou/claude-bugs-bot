@@ -1,10 +1,11 @@
-"""The agent session: what it decides about a report, how it waits, and its startup prompt."""
+"""The agent session: what it decides about a report, how it waits, its startup prompt, and whether a fix is deployed."""
 
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+import subprocess
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,6 +23,10 @@ AGENT_MD = Path(__file__).resolve().parent.parent / "agent" / "AGENT.md"
 # A ListAgents name and reference: one line, no shell or markdown metacharacters.
 _LAUNCHER_SHAPE = re.compile(r"[\w :.()\[\]-]{1,120}")
 _TTY_SHAPE = re.compile(r"/dev/ttys\d{1,4}")
+# A commit as `deployed` takes it: an abbreviated or full hexadecimal hash, nothing a shell could read.
+_COMMIT_SHAPE = re.compile(r"[0-9a-fA-F]{7,40}")
+# A deploy check that takes longer than this is reported, not waited on.
+DEPLOY_CHECK_TIMEOUT = 300
 
 
 def cmd_triage(store: Store, report_id: str, kind: str) -> None:
@@ -141,3 +146,36 @@ def cmd_agent_prompt(
     state["agent"] = record
     store.save_state(state)
     return prompt_file
+
+
+def cmd_deployed(project: Project, commit: str, env: Mapping[str, str]) -> int:
+    """Say whether ``commit`` is served, through the project's ``deploy_check``: a fix is announced only once deployed.
+
+    The check is the project's own shell command, run in its repository with the commit in
+    ``BUGS_BOT_COMMIT``: the commit never enters the command text, and is a hash or refused.
+
+    Returns:
+        0 when the check passes (``deployed=yes``), 1 when it fails (``deployed=no``), 2 when the
+        project has no check (``deployed=unknown``: the launcher's word decides).
+
+    Raises:
+        BugsError: If ``commit`` is not a hexadecimal hash, or the check cannot run or times out.
+    """
+    if not _COMMIT_SHAPE.fullmatch(commit):
+        raise BugsError(f"not a commit hash: {commit!r}")
+    if not project.deploy_check:
+        print("deployed=unknown: the launcher's word decides")
+        return 2
+    try:
+        done = subprocess.run(
+            project.deploy_check,
+            shell=True,
+            cwd=project.repo,
+            env={**env, "BUGS_BOT_COMMIT": commit},
+            capture_output=True,
+            timeout=DEPLOY_CHECK_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise BugsError(f"the deploy check did not complete: {exc}") from None
+    print(f"deployed={'yes' if done.returncode == 0 else 'no'}")
+    return 0 if done.returncode == 0 else 1
