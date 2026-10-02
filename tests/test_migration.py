@@ -76,6 +76,7 @@ def migrate(tmp_path: Path, legacy: Path, legacy_env: Path, repo: Path, capsys):
         return module.main(argv + list(extra))
 
     _migrate.target = target
+    _migrate.module = module
     return _migrate
 
 
@@ -287,3 +288,105 @@ def test_the_script_accepts_the_project_file_that_init_writes(migrate, tmp_path)
     ) == 0
 
     assert migrate(repo=fresh) == 0
+
+
+# --- the legacy gate -------------------------------------------------------------------------------
+
+
+def test_the_legacy_gate_is_printed_and_not_written(migrate, legacy, capsys):
+    (legacy / "settings.json").write_text(json.dumps({"context_gate_tokens": 200000}))
+
+    assert migrate() == 0
+
+    assert "200000" in capsys.readouterr().out
+    assert not any("200000" in p.read_text() for p in migrate.target.rglob("*") if p.is_file())
+
+
+def test_without_settings_the_default_gate_is_said(migrate, capsys):
+    assert migrate() == 0
+
+    assert "300000" in capsys.readouterr().out
+
+
+def test_a_settings_file_without_the_gate_says_the_default(migrate, legacy, capsys):
+    (legacy / "settings.json").write_text("{}")
+
+    assert migrate() == 0
+
+    assert "300000" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("content", ["not json", "[]", '{"context_gate_tokens": "big"}', '{"context_gate_tokens": true}'])
+def test_a_settings_file_that_cannot_be_read_is_refused_and_nothing_moves(migrate, legacy, content):
+    (legacy / "settings.json").write_text(content)
+
+    assert migrate() == 1
+
+    assert (legacy / "inbox").is_dir()
+    assert not migrate.target.exists()
+
+
+# --- preconditions and failures half-way -----------------------------------------------------------
+
+
+def test_an_unreadable_people_directory_is_refused_before_anything_is_written(migrate, legacy, capsys):
+    (legacy / "people").chmod(0)
+    try:
+        assert migrate() == 1
+    finally:
+        (legacy / "people").chmod(0o755)
+
+    assert "Traceback" not in capsys.readouterr().err
+    assert (legacy / "inbox" / "1001").is_dir()
+    assert not migrate.target.exists()
+
+
+def test_a_failure_half_way_lists_what_exists_and_exits_1(migrate, legacy, monkeypatch, capsys):
+    module = migrate.module
+    real_move = module.shutil.move
+
+    def failing_move(source, destination):
+        if source.endswith("people"):
+            raise OSError("disk went away")
+        return real_move(source, destination)
+
+    monkeypatch.setattr(module.shutil, "move", failing_move)
+
+    assert migrate() == 1
+
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert str(migrate.target / "demo" / "inbox") in err
+    assert TOKEN not in err
+    assert not (migrate.target / ".env").exists()
+    assert not (migrate.target / "state.json").exists()
+
+
+@pytest.mark.parametrize("which", ["bugs_home", "project"])
+def test_a_target_that_is_a_file_is_refused_before_any_write(migrate, legacy, which, capsys):
+    if which == "bugs_home":
+        migrate.target.parent.mkdir(exist_ok=True)
+        migrate.target.write_text("a file")
+    else:
+        migrate.target.mkdir()
+        (migrate.target / "demo").write_text("a file")
+
+    assert migrate() == 1
+
+    assert "Traceback" not in capsys.readouterr().err
+    assert (legacy / "inbox" / "1001").is_dir()
+    if which == "bugs_home":
+        assert migrate.target.read_text() == "a file"
+    else:
+        assert not (migrate.target / ".env").exists() and not (migrate.target / "state.json").exists()
+
+
+def test_a_non_utf8_env_file_is_refused_without_printing_the_token(migrate, legacy_env, capsys):
+    legacy_env.write_bytes(f"TELEGRAM_BOT_TOKEN={TOKEN}\n".encode() + b"\xff\xfe\n")
+
+    assert migrate() == 1
+
+    out = capsys.readouterr()
+    assert "Traceback" not in out.err
+    assert TOKEN not in out.out + out.err
+    assert not migrate.target.exists()

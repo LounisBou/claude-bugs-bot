@@ -6,8 +6,11 @@ The legacy layout is ``<legacy-home>/{inbox/, people/, state.json}`` with ``stat
 is ``<bugs-home>/<project>/{inbox/, people/, state.json}`` plus the machine-wide
 ``<bugs-home>/state.json`` (the update offset) and ``<bugs-home>/.env`` (the token).
 
-Every precondition is checked before the first write, so a refused run changes nothing. The token
-value is never printed, and ``.env`` is created with mode 0600 from the start.
+Every source is read and every target checked before the first write, so a refused run changes
+nothing. The directories are written first, the offset and the token last: a failure half-way leaves
+no machine-wide file, and the run says which paths exist and must be dealt with before a re-run. The
+token value is never printed, and ``.env`` is created with mode 0600 from the start. The legacy
+context gate (``settings.json``) is printed, never written: ``init --gate-tokens`` carries it.
 
 Standard library only; it does not import the plugin, so it runs from any checkout.
 """
@@ -24,6 +27,9 @@ from pathlib import Path
 
 PROJECT_ID = re.compile(r"[a-z0-9-]+")
 PROJECT_FILE = ".bugs-bot.json"
+SETTINGS_FILE = "settings.json"
+GATE_KEY = "context_gate_tokens"
+DEFAULT_GATE_TOKENS = 300_000  # bugs_bot.project.DEFAULT_GATE_TOKENS: this script does not import the plugin
 TOKEN_KEY = "TELEGRAM_BOT_TOKEN"
 MOVED_DIRS = ("inbox", "people")
 
@@ -74,11 +80,59 @@ def read_token_line(env_file: Path) -> str:
         lines = env_file.read_text().splitlines()
     except OSError as exc:
         raise Refused(f"cannot read the env file {env_file}: {exc.strerror}") from None
+    except ValueError:
+        raise Refused(f"the env file {env_file} is not valid UTF-8") from None
     for line in lines:
         key, sep, value = line.partition("=")
         if sep and key.strip() == TOKEN_KEY and value.strip().strip("'\""):
             return line
     raise Refused(f"{TOKEN_KEY} not found in {env_file}")
+
+
+def read_gate(legacy: Path) -> int | None:
+    """Return the legacy context gate from ``settings.json``, or ``None`` when there is none to carry.
+
+    Raises:
+        Refused: If the file exists but is unreadable, not an object, or the value is not a natural number.
+    """
+    path = legacy / SETTINGS_FILE
+    if not path.exists():
+        return None
+    gate = read_json_object(path, "legacy settings").get(GATE_KEY)
+    if gate is None:
+        return None
+    if isinstance(gate, bool) or not isinstance(gate, int) or gate < 1:
+        raise Refused(f"{path}: {GATE_KEY} is not a positive integer: {gate!r}")
+    return gate
+
+
+def _unreadable(error: OSError) -> None:
+    raise error
+
+
+def check_readable(source: Path) -> None:
+    """Check that every directory below ``source`` can be listed and every file read.
+
+    Raises:
+        Refused: Naming the first path that cannot be.
+    """
+    try:
+        for root, _, files in os.walk(source, onerror=_unreadable):
+            for name in files:
+                if not os.access(Path(root) / name, os.R_OK):
+                    raise Refused(f"cannot read {Path(root) / name}")
+    except OSError as exc:
+        raise Refused(f"cannot read {exc.filename or source}: {exc.strerror}") from None
+
+
+def check_target_dir(path: Path) -> None:
+    """Check that ``path`` is absent or a directory.
+
+    Raises:
+        Refused: If it is anything else.
+    """
+    if path.exists() and not path.is_dir():
+        raise Refused(f"{path} exists and is not a directory")
 
 
 def check_repo(repo: Path, project: str, chat_id: object) -> None:
@@ -90,7 +144,8 @@ def check_repo(repo: Path, project: str, chat_id: object) -> None:
     data = read_json_object(repo / PROJECT_FILE, "project file")
     if data.get("project") != project:
         raise Refused(f"{repo / PROJECT_FILE} is for project {data.get('project')!r}, not {project!r}")
-    bound = (data.get("group") or {}).get("chat_id")
+    group = data.get("group")
+    bound = group.get("chat_id") if isinstance(group, dict) else None
     if chat_id is not None and bound != chat_id:
         raise Refused(f"{repo / PROJECT_FILE} is bound to group {bound!r}, the legacy state to {chat_id!r}")
 
@@ -112,47 +167,64 @@ def write_json(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def migrate(legacy: Path, bugs_home: Path, project: str, repo: Path, env_file: Path, copy: bool) -> list[str]:
-    """Migrate the legacy tree; return one line per thing done.
+def migrate(legacy: Path, bugs_home: Path, project: str, repo: Path, env_file: Path, copy: bool, done: list[str]) -> None:
+    """Migrate the legacy tree, appending to ``done`` one line per thing written, as it is written.
+
+    Args:
+        legacy: The legacy data directory.
+        bugs_home: The bugs home to fill.
+        project: The project id.
+        repo: The repository holding the project file.
+        env_file: The legacy ``.env``.
+        copy: Copy ``inbox/`` and ``people/`` instead of moving them.
+        done: Receives the report lines (and, for a failure half-way, tells what exists).
 
     Raises:
         Refused: On any failed precondition, before anything is written.
+        OSError: If a write fails half-way; ``done`` then holds what was written.
     """
     if not PROJECT_ID.fullmatch(project):
         raise Refused(f"project must match [a-z0-9-]+, got {project!r}")
     state = read_json_object(legacy / "state.json", "legacy state")
     offset = check_offset(state)
+    gate = read_gate(legacy)
     token_line = read_token_line(env_file)
     check_repo(repo, project, state.get("chat_id"))
 
     target = bugs_home / project
-    if target.exists() and any(target.iterdir()):
+    sources = [name for name in MOVED_DIRS if (legacy / name).is_dir()]
+    for name in sources:
+        check_readable(legacy / name)
+    for path in (bugs_home, target):
+        check_target_dir(path)
+    if target.is_dir() and any(target.iterdir()):
         raise Refused(f"{target} is not empty: refusing to merge into it")
     for name in ("state.json", ".env"):
         if (bugs_home / name).exists():
             raise Refused(f"{bugs_home / name} already exists: refusing to overwrite it")
 
-    done = []
-    write_text_private(bugs_home / ".env", token_line + "\n")
-    done.append(f"token line -> {bugs_home / '.env'} (mode 0600)")
-    write_json(bugs_home / "state.json", {"offset": offset})
-    done.append(f"offset {offset} -> {bugs_home / 'state.json'}")
-    posts = state.get("posts")
-    if posts:
-        write_json(target / "state.json", {"posts": posts})
-        done.append(f"{len(posts)} post(s) -> {target / 'state.json'}")
-    for name in MOVED_DIRS:
+    for name in sources:
         source = legacy / name
-        if not source.is_dir():
-            continue
         count = sum(1 for _ in source.iterdir())
         target.mkdir(parents=True, exist_ok=True)
+        done.append(f"{target / name}/ may exist now ({'copy of' if copy else 'moved from'} {source})")
         if copy:
             shutil.copytree(source, target / name)
         else:
             shutil.move(str(source), str(target / name))
-        done.append(f"{name}/ ({count} entries) {'copied' if copy else 'moved'} -> {target / name}")
-    return done
+        done[-1] = f"{name}/ ({count} entries) {'copied' if copy else 'moved'} -> {target / name}"
+    posts = state.get("posts")
+    if posts:
+        write_json(target / "state.json", {"posts": posts})
+        done.append(f"{len(posts)} post(s) -> {target / 'state.json'}")
+    write_json(bugs_home / "state.json", {"offset": offset})
+    done.append(f"offset {offset} -> {bugs_home / 'state.json'}")
+    write_text_private(bugs_home / ".env", token_line + "\n")
+    done.append(f"token line -> {bugs_home / '.env'} (mode 0600)")
+    if gate is None:
+        done.append(f"legacy gate: none set, the default is {DEFAULT_GATE_TOKENS} tokens (nothing to carry)")
+    else:
+        done.append(f"legacy gate: {gate} tokens, not written: pass --gate-tokens {gate} to init")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -165,10 +237,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", type=Path, required=True, help="the legacy .env holding the token")
     parser.add_argument("--copy", action="store_true", help="copy inbox/ and people/ instead of moving them")
     args = parser.parse_args(argv)
+    done: list[str] = []
     try:
-        done = migrate(args.legacy_home, args.bugs_home, args.project, args.repo, args.env_file, args.copy)
+        migrate(args.legacy_home, args.bugs_home, args.project, args.repo, args.env_file, args.copy, done)
     except Refused as exc:
         print(f"migration refused: {exc}", file=sys.stderr)
+        return 1
+    except (OSError, ValueError) as exc:
+        # The message never holds the token: only paths and the system's reason.
+        print(f"migration failed half-way: {exc}", file=sys.stderr)
+        print("these now exist; deal with them before a re-run (a move: move it back to the legacy home):", file=sys.stderr)
+        print("\n".join(f"  {line}" for line in done) or "  (nothing)", file=sys.stderr)
         return 1
     print("\n".join(done))
     return 0
