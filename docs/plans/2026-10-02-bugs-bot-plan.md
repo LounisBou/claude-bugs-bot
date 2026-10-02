@@ -1,0 +1,543 @@
+# bugs-bot Implementation Plan
+
+> **For agentic workers:** each phase below is dispatched to ONE implementer agent, in its own
+> worktree of `/Users/izno/dev/claude-bugs-bot`, delivering ONE draft PR stacked on the previous
+> phase's branch head. Inside a phase, work test-first (superpowers:test-driven-development):
+> failing test, seen failing, minimal code, green, commit. Steps use checkbox (`- [ ]`) syntax.
+
+**Goal:** turn the TorrentMate-only skill `~/.claude/skills/tm-bugs` into the generic Claude Code
+plugin `bugs-bot` (one bot, one Telegram group and one agent per project), up to a releasable 0.1.0
+and a rehearsed migration of TorrentMate.
+
+**Architecture:** a Python 3 standard-library package `bugs_bot/` split along the spec's units
+(Channel, Pull, Project, Agent, memory), one CLI entry point `bin/bugs-bot` reached through a fixed
+launcher `~/.local/bin/bugs-bot`, slash commands `init`, `start`, `remove`, `doctor`, a generic agent
+(`agent/AGENT.md`) whose project facts are injected into its startup prompt.
+
+**Tech Stack:** Python ≥ 3.10, standard library only; pytest for tests; POSIX `sh` for the launcher;
+PM2 for the one Pull process; the orchestrator plugin's iTerm launcher and context gauge.
+
+**Spec:** `docs/specs/2026-10-02-bugs-bot-design.md` (approved 2026-10-02; § 2 decisions D1–D8 are
+not reopenable). Every implementer reads it whole before its phase.
+
+**Source carried over:** `/Users/izno/.claude/skills/tm-bugs/` — read only, never modified by any
+phase. Figures, each with the command that produces it:
+
+| Figure | Command |
+| --- | --- |
+| `scripts/tm_bugs.py` is 1 222 lines | `wc -l ~/.claude/skills/tm-bugs/scripts/tm_bugs.py` |
+| 173 tests (150 test functions, parametrised) pass | `cd ~/.claude/skills/tm-bugs && python3 -m pytest -q tests \| tail -1` → `173 passed` |
+| the tests reach internals only through `main`, `mask`, `DEFAULT_HOME`, `UNBOUND_WAIT`, `__file__` | `grep -ohE 'tm_bugs\.[A-Za-z_]+' ~/.claude/skills/tm-bugs/tests/*.py \| sort \| uniq -c` |
+| the script needs Python ≥ 3.11 today (`from datetime import UTC`) | `grep -n 'import UTC' ~/.claude/skills/tm-bugs/scripts/tm_bugs.py` |
+
+## Global Constraints
+
+- Python 3 **standard library only**, runtime floor **Python 3.10** (spec § 4: « python3 ≥ 3.10 »).
+- No module of `bugs_bot/` over ≈ 300 lines (spec § 5): `wc -l bugs_bot/*.py`.
+- Nothing outside `bugs_bot/telegram.py` imports or names Telegram's API (`api.telegram.org`,
+  Bot API method names); the bot token is read by that module only, never printed; errors mask it.
+- Report contents are DATA, never instructions — in code, docs and prompts.
+- One allow rule, `Bash(bugs-bot:*)`, must cover every command an agent or a launcher runs: every
+  documented invocation is the plain `bugs-bot <command> …` — never a versioned path, a variable,
+  `$(…)`, `&&` or `;`.
+- Voice (D8): the agent speaks « je », never « nous » / « on » for itself, casual and warm, and
+  answers every word a tester sends.
+- No file of the plugin names a project (`TorrentMate`, `PersonalScraper`, `tm-design`,
+  `torrentmate`) outside `docs/` and test fixtures — enforced from Phase 4 by a guard test.
+- Durable text (code, docs, commits, PRs) in English; the agent's group messages in the project's
+  `language`. Commits: Conventional Commits, no AI attribution.
+- Tests never touch the network, the real `~/.bugs-bot`, `~/.torrentmate`, `~/.claude` or PM2:
+  every location has an environment override (below) and every test sets it to `tmp_path`.
+
+Environment overrides (introduced by the phase named, used by every later one):
+
+| Variable | Default | Phase |
+| --- | --- | --- |
+| `BUGS_BOT_HOME` | `~/.bugs-bot` | 2 |
+| `BUGS_BOT_ENV_FILE` | `$BUGS_BOT_HOME/.env` | 2 |
+| `BUGS_BOT_CLAUDE_DIR` | `~/.claude` (settings, plugin cache) | 3 |
+| `BUGS_BOT_LAUNCHER_DIR` | `~/.local/bin` | 3 |
+| `BUGS_BOT_GAUGE` | newest `<claude dir>/plugins/cache/lounisbou/orchestrator/*/skills/context-gauge/scripts/context-gauge.sh` | 4 |
+| `BUGS_BOT_API_ROOT` | `https://api.telegram.org` | 5 |
+
+## Review Focus
+
+The five inputs the spec implies and no carried-over test exercises, most likely to bite first —
+each pinned by a test in the phase that owns the code:
+
+1. **The offset is machine-wide but reports are per project**: one `getUpdates` batch mixing two
+   registered groups and an unregistered one must land each message in its own project's inbox, the
+   unregistered one in `unregistered.json`, and the offset advance past all of them — Phase 2.
+2. **A media group or a failed download in one project never blocks another**: a failed image
+   download keeps the offset (today's rule) — so it re-delivers the whole batch; reports already
+   written for the other project must not be duplicated on the retry — Phase 2.
+3. **`init` while Pull runs**: a `getUpdates` from `init` would cut Pull's held request (Telegram
+   answers 409 to one of two concurrent pollers); `init` must read `unregistered.json` and never call
+   `getUpdates` when a Pull process is running — Phase 3.
+4. **The launcher on a fresh install or a half-removed version**: no version directory, or one
+   without `bin/bugs-bot`, must print one line and exit non-zero, never run an older broken version
+   silently — Phase 3.
+5. **`handover read` by a successor that crashed half-way**: read twice prints nothing new and
+   never loses the note; a `handover write` while an unread note exists refuses rather than
+   overwrites — Phase 4.
+
+---
+
+## Phase plan
+
+| # | Kind | Branch (stacked on) | Delivers |
+| --- | --- | --- | --- |
+| 1 | conversion | `feat/p1-package` (`main`) | plugin skeleton; `tm_bugs.py` split into `bugs_bot/` modules + `bin/bugs-bot`; the 173 tests carried over, green, behaviour unchanged |
+| 2 | behaviour | `feat/p2-projects` (p1) | project file, registry, data under `~/.bugs-bot/<project>/`, machine offset, Pull routes by chat id, `--project`; `bind` removed |
+| 3 | behaviour | `feat/p3-init-doctor` (p2) | `init`, `remove`, `doctor`, the fixed launcher; `/bugs-bot:init`, `/bugs-bot:remove`, `/bugs-bot:doctor` |
+| 4 | behaviour | `feat/p4-agent` (p3) | generic `AGENT.md` + `SKILL.md`, startup-prompt injection, `/bugs-bot:start`, `handover write\|read`, `gate --measure`, `deployed`, the project-name guard |
+| 5 | behaviour | `feat/p5-ops` (p4) | `pm2.config.js` (`bugs-bot-pull`), the migration script and its rehearsal test, the E2E script, README, CHANGELOG |
+| 6 | verification | `feat/p6-verify` (p5) | spec conformity section by section, E2E run, fixes of what it finds only |
+
+Worktrees: `git -C /Users/izno/dev/claude-bugs-bot worktree add /Users/izno/dev/claude-bugs-bot-wt/p<N> -b <branch> <base>`
+(made by the orchestrator; `workspace.sh create` is not used — brief). One writer per worktree.
+
+---
+
+### Phase 1 — Package and split (conversion)
+
+**Proof of the phase: nothing observable changed.** Same commands, same arguments, same outputs,
+same files written, same Telegram payloads; the 173 carried-over tests pass with their assertions
+untouched.
+
+**Files:**
+- Create: `.claude-plugin/plugin.json` (`name` `bugs-bot`, `version` `0.0.0`, author Lounis Bou
+  `lounis.bou@gmail.com`, `homepage`/`repository` `https://github.com/LounisBou/claude-bugs-bot`,
+  `license` `MIT`; shape of `/Users/izno/dev/claude-orchestrator/.claude-plugin/plugin.json`),
+  `LICENSE` (MIT, Lounis Bou, 2026), `.gitignore` (`__pycache__/`, `.pytest_cache/`).
+- Create: `bin/bugs-bot` (executable, `#!/usr/bin/env python3`, puts the repository root on
+  `sys.path`, `sys.exit(cli.main())`).
+- Create: `bugs_bot/__init__.py`, `errors.py`, `channel.py`, `telegram.py`, `store.py`,
+  `reports.py`, `people.py`, `pull.py`, `agent.py`, `gate.py`, `cli.py`.
+- Copy verbatim (they are rewritten in Phase 4/5, not here): `AGENT.md` → `agent/AGENT.md`,
+  `SKILL.md` → `skills/bugs-bot/SKILL.md`, `pm2.config.js` → `pm2.config.js` (only its `script`
+  line changes, to `__dirname + '/bin/bugs-bot'`).
+- Create: `tests/` — the nine files of `~/.claude/skills/tm-bugs/tests/` copied, then the
+  mechanical edits below only; `pytest.ini` (`testpaths = tests`).
+
+**Module map** (source line ranges in `tm_bugs.py`, `grep -nE '^(def |class )'`):
+
+| Module | Takes |
+| --- | --- |
+| `errors.py` | `BugsError` |
+| `channel.py` | `Transport` type, `Channel` protocol (below) |
+| `telegram.py` | `API_ROOT`, `HTTP_TIMEOUT`, `mask`, `http_transport`, `read_token`, `Api`, `TelegramChannel`, `utf16_len`, the mention entity builder |
+| `store.py` | `DEFAULT_HOME`, `Store`, `write_json`, status sets, `load_report` |
+| `pull.py` | poll/backoff/purge constants, `largest_photo`, `attachments`, `has_content`, `author_of`, `group_messages`, `build_report`, `purge_old_done`, `set_reaction`, `retry_pending_reactions`, `cmd_pull`, `pull_loop`, `watch_loop`, `chats_seen`, `cmd_bind` |
+| `reports.py` | `one_line`, `cmd_list`, `cmd_show`, `bound_chat`, `send_reply`, `cmd_reply`, `cmd_edit`, `move_to`, `say_reaction_pending`, `cmd_taken`, `cmd_fixed`, `cmd_done`, `cmd_post`, `cmd_backfill_authors` |
+| `people.py` | `person_ref`, `load_person`, `cmd_person`, `cmd_person_note` |
+| `agent.py` | `KINDS`, `WAIT_*`, `AGENT_MD` (now `<repo>/agent/AGENT.md`), shape regexes, `cmd_triage`, `untriaged`, `cmd_wait`, `cmd_pending`, `cmd_agent_prompt` |
+| `gate.py` | gate constants, `_gate_setting`, `cmd_gate` |
+| `cli.py` | `_int_arg`, `build_parser`, `main` (same signature) |
+
+**Interfaces — Produces** (consumed by every later phase):
+
+```python
+# bugs_bot/channel.py
+Transport = Callable[..., tuple[int, bytes]]   # (url, payload: dict | None, timeout: float | None = None)
+
+class Mention(TypedDict):
+    user_id: int | None
+    username: str | None
+    name: str
+
+class Channel(Protocol):
+    def get_updates(self, offset: int | None, timeout: int, allowed_updates: list[str] | None = None) -> list[dict]: ...
+    def send(self, chat_id: int, text: str, reply_to: int | None = None, mention: Mention | None = None) -> dict: ...
+    # returns {"message_id": int, "text": str}: the text as posted (mention prefix included)
+    def edit(self, chat_id: int, message_id: int, text: str, mention: Mention | None = None) -> dict: ...
+    def react(self, chat_id: int, message_id: int, emoji: str) -> None: ...
+    def get_file(self, file_id: str) -> bytes: ...
+    def list_admins(self, chat_id: int) -> list[dict]: ...
+    @property
+    def secret(self) -> str | None: ...   # for masking only
+
+# bugs_bot/telegram.py
+class TelegramChannel:            # implements Channel over Api(token, transport)
+    def __init__(self, token: str, transport: Transport) -> None: ...
+
+# bugs_bot/cli.py — unchanged signature
+def main(argv: list[str] | None = None, *, transport: Transport | None = None,
+         env: Mapping[str, str] | None = None, now: float | None = None,
+         sleep: Callable[[float], None] | None = None, clock: Callable[[], float] | None = None) -> int: ...
+```
+
+Every `cmd_*` that touched `Api` now takes a `Channel`. `api.call("<method>", …)` appears only in
+`telegram.py`: `grep -n 'call("' bugs_bot/*.py` lists `telegram.py` lines only. A `getUpdates`
+held open keeps today's read timeout (`timeout + POLL_READ_MARGIN`).
+
+**Test carry-over — the only edits allowed** (the diff of `tests/` against the source shows these
+and nothing else: `diff -r ~/.claude/skills/tm-bugs/tests tests`):
+
+- `conftest.py`: `sys.path` points at the repository root; `import tm_bugs` → `from bugs_bot import cli`;
+  `tm_bugs.main(` → `cli.main(`; a `REPO_ROOT` constant for the paths below.
+- `tm_bugs.mask` → `telegram.mask`; `tm_bugs.UNBOUND_WAIT` → `pull.UNBOUND_WAIT`;
+  `tm_bugs.DEFAULT_HOME` → `store.DEFAULT_HOME`; `Path(tm_bugs.__file__).resolve().parent.parent / "AGENT.md"`
+  → `REPO_ROOT / "agent" / "AGENT.md"`; `… / "pm2.config.js"` → `REPO_ROOT / "pm2.config.js"`.
+- Python 3.10: `from datetime import UTC` → `timezone.utc` wherever it appears (code and tests).
+
+**Steps:**
+- [ ] Copy the tests, apply the edits above, run `python3 -m pytest -q` → fails on `ModuleNotFoundError: bugs_bot`.
+- [ ] Skeleton files (plugin.json, LICENSE, .gitignore, pytest.ini, verbatim copies) — commit `chore: plugin skeleton`.
+- [ ] Move code module by module (errors → channel/telegram → store → pull → reports → people → agent → gate → cli), suite run after each; one commit per module group, `refactor(<module>): …`.
+- [ ] Introduce `Channel`/`TelegramChannel`; `cmd_*` take a `Channel` — commit `refactor(channel): …`.
+- [ ] `bin/bugs-bot` — run `./bin/bugs-bot --help` (prog name and command list identical to `python3 ~/.claude/skills/tm-bugs/scripts/tm_bugs.py --help` but for `prog`) — commit.
+- [ ] Final: `python3 -m pytest -q | tail -1` → `173 passed` on Python 3.12 AND on a 3.10 interpreter if one is installed (`ls ~/.pyenv/versions`; none → say so in the PR); `wc -l bugs_bot/*.py` (each ≤ 300).
+
+**Test matrix:** the 173 carried-over tests; no new test (a conversion adds none). `grep -rn 'api.telegram.org\|getUpdates\|sendMessage' bugs_bot | grep -v telegram.py` → empty.
+
+**Definition of done:** draft PR `refactor: split tm-bugs into the bugs_bot package` on `main`;
+`173 passed`; `diff -r` of tests shows only the listed edits; every module ≤ 300 lines; no
+behaviour change claimed or made.
+
+**Review focus:** a « harmless » change slipped into the move (an error message, an argument
+default, a payload key); `Channel` leaking Telegram names (`message_id` is fine, `sendMessage` is
+not); masking still applied on every error path (`main`'s two `except` branches).
+
+---
+
+### Phase 2 — Projects, registry, routing (behaviour)
+
+**Proof: the behaviour changed and tests drive it.** One machine-wide Pull serves N projects.
+
+**Files:**
+- Create: `bugs_bot/project.py`, `bugs_bot/registry.py`, `tests/test_project.py`, `tests/test_registry.py`, `tests/test_routing.py`.
+- Modify: `store.py` (homes), `telegram.py` (`read_token`), `pull.py` (routing, unregistered log, machine offset; `cmd_bind` deleted, `chats_seen` kept), `cli.py` (`--project` on every per-project command; error prefix `bugs-bot:`; `prog` `bugs-bot`), `agent.py`/`gate.py`/`reports.py`/`people.py` (take a per-project `Store`), `tests/conftest.py` and the carried-over tests (fixtures register a project instead of binding).
+
+**Data layout** (spec § 3.3):
+
+```
+$BUGS_BOT_HOME/                      default ~/.bugs-bot
+  .env                               TELEGRAM_BOT_TOKEN (BUGS_BOT_ENV_FILE overrides)
+  state.json                         {"offset": int | null}            machine-wide, Pull only
+  projects.json                      {"<chat_id>": {"project": str, "repo": "/abs/path"}}
+  unregistered.json                  {"<chat_id>": {"title": str, "type": str, "last_seen": iso}}
+  <project>/inbox/<report-id>/       as today
+  <project>/people/                  as today
+  <project>/state.json               {"posts": [...]} (and, from Phase 4, "agent", "handovers")
+  <project>/agent.json               as today until Phase 4
+```
+
+**Interfaces — Produces:**
+
+```python
+# bugs_bot/project.py
+PROJECT_FILE = ".bugs-bot.json"
+PROJECT_ID = re.compile(r"[a-z0-9-]+")
+DEFAULT_GATE_TOKENS = 300_000
+
+@dataclass(frozen=True)
+class Project:
+    project: str
+    chat_id: int
+    title: str
+    agent_title: str
+    repo: Path                       # the directory holding PROJECT_FILE
+    deploy_url: str | None = None
+    deploy_check: str | None = None
+    docs: tuple[str, ...] = ()
+    language: str = "fr"
+    gate_tokens: int = DEFAULT_GATE_TOKENS
+
+def find_project_file(start: Path) -> Path | None          # start, then each parent
+def load_project(path: Path) -> Project                     # BugsError naming the bad key
+def dump_project(project: Project) -> dict                  # the JSON shape of spec § 3.3 (no "repo")
+def resolve_project(name: str | None, cwd: Path, registry: "Registry") -> Project
+    # name given → registry.by_project(name) → load_project(repo / PROJECT_FILE)
+    # name None → find_project_file(cwd); none → BugsError("no .bugs-bot.json here or above: run /bugs-bot:init")
+
+# bugs_bot/registry.py
+@dataclass(frozen=True)
+class Entry:
+    project: str
+    repo: Path
+
+class Registry:
+    def __init__(self, path: Path) -> None
+    def entries(self) -> dict[int, Entry]                    # {} when the file is absent; BugsError if unparseable
+    def project_for(self, chat_id: int) -> Entry | None
+    def by_project(self, project: str) -> tuple[int, Entry] | None
+    def add(self, chat_id: int, project: str, repo: Path) -> None
+        # idempotent; the same project under a new chat id replaces its old entry;
+        # a chat id held by ANOTHER project → BugsError
+    def remove(self, project: str) -> bool                  # True when an entry was removed
+
+# bugs_bot/store.py
+DEFAULT_HOME = Path.home() / ".bugs-bot"
+def bugs_home(env: Mapping[str, str]) -> Path              # BUGS_BOT_HOME or DEFAULT_HOME
+class Machine:                                              # the machine-wide files above
+    def __init__(self, home: Path) -> None
+    registry: Registry
+    def load_offset(self) -> int | None
+    def save_offset(self, offset: int | None) -> None
+    def note_unregistered(self, chat: dict, now: float) -> None
+    def unregistered(self) -> dict[int, dict]
+    def project_store(self, project: str) -> Store          # Store(home / project)
+
+# bugs_bot/pull.py
+def cmd_pull(channel: Channel | None, machine: Machine, now: float, poll_timeout: int = 0, purge: bool = True) -> None
+```
+
+**Behaviour:**
+- Pull reads the registry every round; empty registry → one line « no project registered » and
+  exit 0 (single pull) / wait `UNBOUND_WAIT` (watch) — today's unbound behaviour, now keyed on the registry.
+- Each message of a registered chat → that project's inbox (media groups, 👀, pending reactions
+  retried per project, 30-day purge per project — unchanged).
+- A message of an unregistered group chat → `note_unregistered` + one stderr line
+  `bugs-bot: unregistered chat <id> '<title>' dropped`; never written to an inbox.
+- The offset advances past every update of the batch, machine-wide; a failed download keeps it
+  (today's rule), and the re-delivered batch writes no duplicate report (report id = date + message id
+  already exists → skipped).
+- Every per-project command takes `--project <p>`, else the project of the current directory.
+
+**Test matrix (new):** project file valid/invalid shapes (bad id, missing chat_id, gate_tokens ≤ 0);
+`find_project_file` from a nested directory; `resolve_project` by name and by cwd, and its refusal;
+registry add idempotent / replace / conflicting chat id / remove / unparseable file; routing:
+one batch with project A, project B and an unregistered group → two inboxes, one `unregistered.json`
+entry, one stderr line, offset past all; the Review Focus 2 retry (failed download in B, batch
+re-delivered, A not duplicated); `--project` overrides cwd. Carried-over tests: fixtures register
+the `GROUP_ID` group as project `demo` instead of binding; `bind` tests deleted (their discovery
+cases move to Phase 3); assertion changes limited to paths, the `bugs-bot:` prefix and `bind`.
+
+**Definition of done:** draft PR stacked on p1; `python3 -m pytest -q` green; the PR body lists
+every carried-over test whose assertion changed and why (`git diff feat/p1-package -- tests/`);
+`grep -rn 'torrentmate\|tm-bugs\|TM_BUGS' bugs_bot bin` → empty.
+
+**Review focus:** the offset/duplicate logic of the retry; a path built from a report id or a
+project id escaping `BUGS_BOT_HOME` (both validated by regex before any join); `Store` still per
+project everywhere (no command reaching another project's inbox).
+
+---
+
+### Phase 3 — init, remove, doctor, the fixed launcher (behaviour)
+
+**Files:**
+- Create: `bugs_bot/init.py`, `bugs_bot/doctor.py`, `commands/init.md`, `commands/remove.md`,
+  `commands/doctor.md`, `tests/test_init.py`, `tests/test_doctor.py`, `tests/test_launcher.py`.
+- Modify: `cli.py` (three commands), `pull.py` (nothing but imports, if any).
+
+**CLI:**
+
+```
+bugs-bot init --project <id> [--chat-id N --title T] [--agent-title T] [--deploy-url U]
+              [--deploy-check CMD] [--docs P ...] [--language L] [--gate-tokens N] [--repo DIR]
+bugs-bot remove [--project <p>]
+bugs-bot doctor [--install-launcher]
+```
+
+**Interfaces — Produces:**
+
+```python
+# bugs_bot/init.py
+def git_exclude_path(repo: Path) -> Path                    # `git -C repo rev-parse --git-path info/exclude`, absolute
+def add_exclude(repo: Path) -> bool                         # appends "/.bugs-bot.json" once; True when added
+def discover_groups(channel: Channel | None, machine: Machine, pull_running: bool) -> dict[int, dict]
+    # pull_running → machine.unregistered() only, NO getUpdates;
+    # else getUpdates WITHOUT offset (consumes nothing) through chats_seen(), merged with unregistered()
+def cmd_init(channel: Channel | None, machine: Machine, repo: Path, args: InitArgs, pull_running: bool) -> int
+def cmd_remove(machine: Machine, project: Project) -> None  # registry entry removed; prints the data dir and project file kept
+
+# bugs_bot/doctor.py
+@dataclass(frozen=True)
+class Check:
+    name: str
+    ok: bool
+    detail: str                                              # never the token
+def pull_processes(ps_output: str) -> list[int]             # pids whose command runs `bugs-bot` … `pull --watch`
+def run_checks(env: Mapping[str, str], ps_output: str) -> list[Check]
+def install_launcher(target_dir: Path) -> Path              # writes target_dir / "bugs-bot", mode 0755
+LAUNCHER_TEXT: str
+```
+
+**init rules:** `repo` = `--repo` or `git rev-parse --show-toplevel` of cwd; first run needs
+`--project`, `--agent-title` and a group (`--chat-id` with `--title`, or exactly one discovered
+group — zero or several: list them and exit 1, never guess); a re-run keeps every value not given
+on the command line, updates the file and the registry entry, never duplicates either; the
+`.git/info/exclude` line is added once; the project's `.gitignore` is never touched; prints the
+written file and the registry line.
+
+**Launcher** (`LAUNCHER_TEXT`, the spec's « 3-line launcher », plus its refusal line):
+
+```sh
+#!/bin/sh
+d=$(ls -d "${BUGS_BOT_CLAUDE_DIR:-$HOME/.claude}"/plugins/cache/lounisbou/bugs-bot/*/bin/bugs-bot 2>/dev/null | sort -V | tail -1)
+[ -n "$d" ] || { echo "bugs-bot: no installed version found — run /bugs-bot:doctor" >&2; exit 127; }
+exec python3 "$d" "$@"
+```
+
+**doctor checks** (each a `Check`, exit 0 only when all pass): Python ≥ 3.10; the token readable
+(« present », never its value); registry parseable; exactly one Pull process; the orchestrator
+plugin installed (`<claude dir>/plugins/cache/lounisbou/orchestrator/*/`); the launcher installed
+and identical to `LAUNCHER_TEXT`; the allow rule `Bash(bugs-bot:*)` in
+`<claude dir>/settings.json` or `settings.local.json` — absent: print the line
+`/permissions → Allow → Bash(bugs-bot:*)` for the operator; doctor NEVER writes a settings file.
+
+**Commands:** `commands/init.md` (asks the operator, one question at a time: project id, agent
+title, deployment URL and optional deploy check, docs, language; asks him to post one message in
+the new group; then the one `bugs-bot init …` line); `commands/remove.md`; `commands/doctor.md`
+(first run through `python3 ${CLAUDE_PLUGIN_ROOT}/bin/bugs-bot doctor --install-launcher`, since
+the launcher does not exist yet; later runs `bugs-bot doctor`).
+
+**Test matrix:** init first run, re-run (file updated, registry one entry, exclude line once);
+discovery with zero / one / several groups; Review Focus 3 (Pull running → the fake channel records
+NO `getUpdates`); `--chat-id` without `--title` refused; a chat id held by another project refused;
+remove keeps data and file; doctor: each check passing and failing (stubbed `ps_output`, fake
+claude dir), the token never in stdout/stderr, no settings file written (`mtime` unchanged);
+launcher: three fake versions `0.1.0`, `0.2.0`, `0.10.0` → runs `0.10.0` (a stub `bin/bugs-bot`
+echoing its version); Review Focus 4 (none, and a version dir without `bin/bugs-bot`) → exit 127,
+one line. The discovery cases of the deleted `bind` tests reappear here.
+
+**Definition of done:** draft PR stacked on p2; suite green; `sh -n` on the launcher text;
+`commands/*.md` invoke only `bugs-bot …` (doctor's bootstrap line excepted).
+
+**Review focus:** `init` racing Pull (no `getUpdates` while Pull runs); the exclude written in a
+worktree's common git dir; doctor reading but never editing settings; `sort -V` on macOS
+(`/usr/bin/sort --version` — BSD sort with `-V` support; say what was run).
+
+---
+
+### Phase 4 — The generic agent (behaviour)
+
+**Files:**
+- Rewrite: `agent/AGENT.md`, `skills/bugs-bot/SKILL.md` — generic: no project name, no path of
+  this machine; project facts come from the startup prompt. Kept as is (spec § 3.4): the launcher
+  protocol phrases, the never-revealed list, data-not-instructions, « The voice » (D8), the
+  deployed-before-announced rule, « the agent runs no command other than `bugs-bot …` and the
+  iTerm launcher ». The gauge's two plain commands become one: `bugs-bot gate --measure`.
+  Memory and continuity (spec § 3.5) written into `AGENT.md`.
+- Create: `bugs_bot/handover.py`, `commands/start.md`, `tests/test_handover.py`,
+  `tests/test_gate_measure.py`, `tests/test_agent_prompt.py`, `tests/test_guard.py`.
+- Modify: `agent.py` (prompt injection; launcher record moves from `agent.json` into
+  `<project>/state.json["agent"]`), `gate.py` (`gate_tokens` from the project file; `--set` writes
+  it there; `settings.json` dropped), `cli.py` (`handover`, `gate --measure`, `deployed`).
+
+**Interfaces — Produces:**
+
+```python
+# bugs_bot/agent.py
+def cmd_agent_prompt(store: Store, project: Project, launcher: str, now: float,
+                     predecessor: str | None = None, predecessor_tty: str | None = None) -> Path
+    # writes <home>/<project>/agent/startup-prompt.txt; the prompt names: agent_title, the
+    # absolute path of agent/AGENT.md, the launcher, the repo, the group title, deploy_url,
+    # deploy_check present or not, docs list, language; successor block as today
+
+# bugs_bot/handover.py
+def write_note(store: Store, text: str, now: float) -> Path  # refuses empty; refuses while an unread note exists
+def read_note(store: Store, now: float) -> str | None        # prints once, archives to handover/<YYYYMMDD-HHMMSS>.md,
+                                                             # appends to state.json["handovers"]; None when no note
+
+# bugs_bot/gate.py
+def locate_gauge(env: Mapping[str, str]) -> Path             # BUGS_BOT_GAUGE, else newest by version; BugsError when none
+def measure(env: Mapping[str, str], run: Callable[[list[str]], str]) -> tuple[int, int]   # (tokens, window)
+def cmd_gate(project: Project, set_to: int | None, window: int | None, tokens: int | None,
+             measure_now: bool, env: Mapping[str, str]) -> None
+    # prints gate_tokens=; with tokens or --measure also context_tokens=, context_window=, handover=yes|no
+
+# CLI
+bugs-bot handover write "<text>" | handover read
+bugs-bot gate [--set N] [--window W --tokens N] [--measure]
+bugs-bot deployed <commit>      # runs deploy_check with BUGS_BOT_COMMIT=<commit> in the repo:
+                                # exit 0 → "deployed=yes"; non-zero → "deployed=no", exit 1;
+                                # no deploy_check → "deployed=unknown: the launcher's word decides", exit 2
+```
+
+`/bugs-bot:start` (`commands/start.md`): refuses without `.bugs-bot.json` (points to
+`/bugs-bot:init`); `ListAgents` — a live row named `agent_title` → refuse (« you already have
+one » / « it belongs to <launcher> », from `state.json["agent"]`); `bugs-bot agent-prompt
+--launcher "<name [ref]>"`; spawn through the newest orchestrator `iterm-agent.sh`
+(`spawn --dir <repo> --title "<agent_title>" --prompt-file <path> --right-of self`), `list`,
+`move` if needed, `verify`, `ListAgents` — today's five steps, made generic; no orchestrator
+plugin → say so and stop.
+
+**Guard test** (`tests/test_guard.py`): walks every tracked file (`git ls-files`) outside `docs/`
+and `tests/fixtures/`; fails on `TorrentMate`, `PersonalScraper`, `tm-design`, `torrentmate`
+(case-insensitive), naming the file and line. Seen failing first on a planted line.
+
+**Test matrix:** prompt carries each project field and no other project's; launcher/predecessor
+shape refusals (carried over); handover write/read/read-again/unread-refusal (Review Focus 5),
+archive name and `state.json` entry; `gate --measure` with a stub gauge script printing
+`context_tokens=310000` / `context_window=1000000` → `handover=yes`, and a failing gauge → exit 1;
+`gate --set` writes the project file; small window rule (80 %) carried over; `deployed` three
+outcomes; guard test.
+
+**Definition of done:** draft PR stacked on p3; suite green including the guard; `grep -n
+'python3 \|\$(' agent/AGENT.md skills/bugs-bot/SKILL.md commands/*.md` shows no invocation other
+than `bugs-bot …` and the iTerm launcher path read by `ls -d … | sort -V | tail -1`.
+
+**Review focus:** a voice or protocol rule lost in the rewrite (diff the two `AGENT.md` side by
+side, rule by rule); injection of project-file values into the prompt (a docs entry or title with
+newlines or quotes must not break or extend the prompt — validated or quoted); `deploy_check`
+runs in the repo, never through a shell built from report text.
+
+---
+
+### Phase 5 — Operations: PM2, migration, E2E, docs (behaviour)
+
+**Files:**
+- Modify: `pm2.config.js` — `name: 'bugs-bot-pull'`, `script: __dirname + '/bin/bugs-bot'`,
+  `args: 'pull --watch'`, `interpreter: process.env.BUGS_BOT_PYTHON || 'python3'`, today's
+  `autorestart`, `restart_delay`, `kill_timeout`, no `cron_restart`, comments kept.
+- Modify: `telegram.py` (`API_ROOT` from `BUGS_BOT_API_ROOT`, for the E2E only).
+- Create: `docs/migration/tm_bugs_to_bugs_bot.py` — spec § 6 step 3 as a script:
+  `--legacy-home DIR --bugs-home DIR --project ID --repo DIR --env-file FILE [--copy]` — moves
+  (or with `--copy` copies) `inbox/` and `people/` to `<bugs-home>/<project>/`, the offset from the
+  legacy `state.json` to `<bugs-home>/state.json` EXACTLY, the token line to `<bugs-home>/.env`
+  (mode 0600, value never printed), `posts` to the project's `state.json`; refuses when the target
+  project directory is non-empty. Lives under `docs/` (it names the legacy layout).
+- Create: `docs/migration/RUNBOOK.md` — spec § 6 steps 1–6 as commands, the rehearsal first.
+- Create: `tests/test_migration.py` (a fixture legacy tree → migrated tree; offset identical;
+  token absent from output; second run refused), `tests/e2e.sh` (a local fake Bot API on
+  `http.server`, `BUGS_BOT_API_ROOT` pointed at it, `bin/bugs-bot` driven through `init`, `pull`,
+  `list`, `reply --mention`, `taken`, `fixed`, `handover write/read`, two projects; kills its server;
+  prints `E2E OK`).
+- Create: `README.md` (house shape of `/Users/izno/dev/claude-orchestrator/README.md`: what it is,
+  install, the allow rule, commands, setup by the operator — BotFather privacy, group admin —,
+  tests), `CHANGELOG.md` (`## 0.1.0 — unreleased`).
+
+**Test matrix:** migration test; PM2 config test (carried-over pm2 tests updated to the new name);
+`tests/e2e.sh` run.
+
+**Definition of done:** draft PR stacked on p4; `python3 -m pytest -q` green; `sh tests/e2e.sh`
+→ `E2E OK` and `ps -eo pid,command | grep -c '[h]ttp.server'` → `0` after it.
+
+**Review focus:** the offset copied exactly (no `+1`, no `null` turned into `0`); the token file's
+mode; the E2E server killed on failure paths too (`trap`).
+
+---
+
+### Phase 6 — Final verification
+
+**Files:** only fixes of what this phase finds, each with a test; `docs/verification/2026-10-02-conformity.md`.
+
+**Steps:**
+- [ ] Spec conformity: for each section § 1–§ 9 and each success criterion 1–6, the file/test that
+  meets it, or the gap — written in `docs/verification/…`.
+- [ ] `python3 -m pytest -q`, `sh tests/e2e.sh`, the guard, `wc -l bugs_bot/*.py`.
+- [ ] Migration rehearsal on a COPY: `cp -R ~/.torrentmate/tm-bugs <tmp>/legacy` then the script
+  with `--copy` into a temp `--bugs-home`, a test registry; compare offset, report count
+  (`ls <tmp>/legacy/inbox | wc -l` vs the migrated inbox), people count. Nothing under the real
+  `~/.bugs-bot`; the temp tree deleted after (`ls` proves it).
+- [ ] Gaps that are defects: fixed here with a test. Gaps that are scope: listed for the operator.
+
+**Definition of done:** draft PR stacked on p5 with the conformity document; every check above run
+and its output quoted in the PR.
+
+---
+
+## After the build (orchestrator, not implementers)
+
+1. GitHub repository `LounisBou/claude-bugs-bot` (public, MIT) created when Phase 1's PR needs it;
+   `main` pushed.
+2. Each PR: review session + norms check, one correction round, rebased, « ready » to the operator;
+   undraft and squash-merge are his.
+3. Marketplace: a PR on `LounisBou/claude-statusbar` adding `bugs-bot` (source github
+   `LounisBou/claude-bugs-bot`); « Orch : optim plugin 5 » told.
+4. Release 0.1.0: on the operator's word.
+5. Migration (spec § 6): proposed to « Orch : TM frontend », run at a quiet point with its agreement
+   — rehearsal first, then the RUNBOOK; the allow rule is the operator's `/permissions`; the
+   PersonalScraper PR removing the two old allow rules from a worktree of mine.
