@@ -174,10 +174,6 @@ def main(
             return watch_loop(machine, env, transport, args.poll_timeout, wall, sleep, clock)
         if args.command == "pull" and args.every:
             return pull_loop(machine, env, transport, args.every, wall, sleep)
-        # With no project registered a pull must stay quiet and green, even before the token is read.
-        if args.command == "pull" and not machine.registry.entries():
-            cmd_pull(None, machine, now)
-            return 0
         if args.command == "pull":
             token = read_token(env)
             cmd_pull(TelegramChannel(token, transport), machine, now)
