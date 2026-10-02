@@ -221,11 +221,12 @@ def test_the_http_transport_sends_an_upload_as_its_bytes_and_content_type(monkey
         def read(self):
             return b'{"ok": true}'
 
-    def urlopen(request, timeout):
+    def open_(request, timeout):
         seen.update(data=request.data, type=request.get_header("Content-type"), auth=request.get_header("Authorization"))
         return Answer()
 
-    monkeypatch.setattr(channels.urllib.request, "urlopen", urlopen)
+    # The transport's own opener (it follows no redirect carrying a credential): nothing reaches the network.
+    monkeypatch.setattr(channels._OPENER, "open", open_)
     body = multipart({"chat_id": "1"}, [("photo", "image-1.png", PNG, "image/png")])
 
     status, _ = channels.http_transport("https://example.invalid/up", body, None, {"Authorization": "Bearer x"})
