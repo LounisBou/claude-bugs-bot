@@ -35,10 +35,9 @@ from bugs_bot.init import InitArgs, cmd_init, cmd_remove, init_kind, repo_root
 from bugs_bot.people import cmd_backfill_authors, cmd_person, cmd_person_lang, cmd_person_note
 from bugs_bot.project import find_project_file, load_project, resolve_project
 from bugs_bot.questions import cmd_unask
+from bugs_bot.replies import cmd_delete, cmd_edit
 from bugs_bot.reports import (
-    cmd_delete,
     cmd_done,
-    cmd_edit,
     cmd_fixed,
     cmd_list,
     cmd_post,
