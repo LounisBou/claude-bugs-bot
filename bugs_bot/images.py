@@ -11,6 +11,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from bugs_bot.channel import Channel, ChatId, ImagesNotSent, Mention, MessageId
 from bugs_bot.errors import BugsError
 
 MAX_IMAGES = 10
@@ -71,6 +72,26 @@ def check_images(paths: list[str]) -> list[Path]:
     if refused:
         raise BugsError("image refused, nothing sent: " + "; ".join(refused))
     return resolved
+
+
+def post(
+    channel: Channel, chat_id: ChatId, text: str, paths: list[Path], reply_to: MessageId | None = None, mention: Mention | None = None
+) -> tuple[list[dict], list[Path], ImagesNotSent | None]:
+    """Send ``text`` alone, or with ``paths`` (checked already) when there are some.
+
+    Returns:
+        ``(messages posted, images posted, failure)``: the failure is the images lost after their text went
+        out alone — the caller records what was posted, then raises it.
+
+    Raises:
+        BugsError: Nothing was posted.
+    """
+    if not paths:
+        return [channel.send(chat_id, text, reply_to, mention)], [], None
+    try:
+        return channel.send_images(chat_id, text, paths, reply_to, mention), paths, None
+    except ImagesNotSent as exc:
+        return [exc.sent], [], exc
 
 
 def record_sent(report_dir: Path, reply_number: int, paths: list[Path]) -> list[str]:

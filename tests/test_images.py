@@ -7,12 +7,16 @@ from pathlib import Path
 
 import pytest
 from fake_slack import CHANNEL, SLACK_TOKEN, FakeSlack, ts
-from samples import GROUP_ID, TOKEN, FakeTelegram, parse_multipart
+from samples import BASE_DATE, GROUP_ID, TOKEN, FakeTelegram, parse_multipart
+from test_lock import LockProbe, lock_is_free
+from test_mention import STAMP, write_report
 
+from bugs_bot import reports
 from bugs_bot.channel import ImagesNotSent, multipart
 from bugs_bot.errors import BugsError
 from bugs_bot.images import MAX_BYTES, MAX_IMAGES, check_images, record_sent
 from bugs_bot.slack import SlackChannel
+from bugs_bot.store import Store
 from bugs_bot.telegram import TelegramChannel
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
@@ -297,3 +301,101 @@ def test_slack_never_uploads_to_a_host_that_is_not_slack(tmp_path):
         channel.send_images(CHANNEL, "x", check_images([image(tmp_path, "a.png")]))
 
     assert api.uploads == [] and "files.completeUploadExternal" not in api.methods()
+
+
+# -- reply and post with --image: checked first, sent outside the lock, recorded after ---------
+
+RID = f"{STAMP}-5"
+
+
+def report_json(home: Path, report_id: str = RID) -> dict:
+    return json.loads((home / "inbox" / report_id / "report.json").read_text())
+
+
+def test_reply_with_images_threads_them_on_the_report_and_records_what_was_sent(run, bound, tmp_path, capsys):
+    write_report(bound, 5, author_id=7, author_username="laura_t")
+    tg = FakeTelegram()
+    shots = [image(tmp_path, "shots/étape 1.png"), image(tmp_path, "shots/étape 2", JPEG)]
+
+    assert run("reply", RID, "Voilà où appuyer", "--image", shots[0], "--image", shots[1], "--mention", transport=tg, now=BASE_DATE) == 0
+
+    form = tg.photos[0]
+    assert form["method"] == "sendMediaGroup" and json.loads(form["fields"]["reply_parameters"]) == {"message_id": 5}
+    assert json.loads(form["fields"]["media"])[0]["caption"] == "@laura_t Voilà où appuyer"
+    reply = report_json(bound)["replies"][0]
+    assert reply == {"date": "2026-10-02T08:30:00+00:00", "text": "@laura_t Voilà où appuyer", "message_id": 610, "images": ["sent/1-1.png", "sent/1-2.jpg"]}
+    assert (bound / "inbox" / RID / "sent" / "1-2.jpg").read_bytes() == JPEG
+    capsys.readouterr()
+    assert run("show", RID) == 0
+    shown = capsys.readouterr().out
+    assert f"  {(bound / 'inbox' / RID / 'sent' / '1-1.png').resolve()}" in shown.splitlines()
+
+
+def test_a_bad_image_among_good_ones_sends_nothing_and_records_nothing(run, bound, tmp_path, capsys):
+    write_report(bound, 5)
+    before = report_json(bound)
+    tg = FakeTelegram()
+    good, bad = image(tmp_path, "ok.png"), image(tmp_path, "notes.png", b"plain text")
+
+    code = run("reply", RID, "regarde", "--image", good, "--image", bad, transport=tg, now=BASE_DATE)
+
+    assert tg.calls == [], "something went out before every image was checked"
+    assert code == 1
+    assert report_json(bound) == before
+    assert "not a PNG, JPEG or WebP image" in capsys.readouterr().err
+
+
+def test_images_failing_after_a_long_text_record_the_text_alone(run, bound, tmp_path, capsys):
+    write_report(bound, 5)
+    tg = FakeTelegram()
+    tg.photo_error = "Bad Request: IMAGE_PROCESS_FAILED"
+
+    assert run("reply", RID, "x" * 1100, "--image", image(tmp_path, "a.png"), "--awaits", transport=tg, now=BASE_DATE) == 1
+
+    after = report_json(bound)
+    assert not (bound / "inbox" / RID / "sent").exists(), "images that never went out were recorded as sent"
+    assert after["replies"] == [{"date": "2026-10-02T08:30:00+00:00", "text": "x" * 1100, "message_id": 777}]
+    assert "awaiting" not in after, "a question whose images never went out does not wait"
+    assert "the text was posted alone, not the images" in capsys.readouterr().err
+
+
+def test_awaits_with_images_waits_on_that_reply(run, bound, tmp_path):
+    write_report(bound, 5)
+
+    assert run("reply", RID, "C'est bien cet écran ?", "--image", image(tmp_path, "a.png"), "--awaits", now=BASE_DATE) == 0
+
+    assert report_json(bound)["awaiting"] == {"since": "2026-10-02T08:30:00+00:00", "reply": 1}
+
+
+def test_a_question_that_would_be_queued_is_refused_with_its_images(run, bound, tmp_path, capsys):
+    write_report(bound, 5, author_id=7)
+    write_report(bound, 6, author_id=7)
+    assert run("reply", RID, "Tu es sur quel iPhone ?", "--awaits", now=BASE_DATE) == 0
+    tg = FakeTelegram()
+
+    assert run("reply", f"{STAMP}-6", "Et là ?", "--awaits", "--image", image(tmp_path, "a.png"), transport=tg, now=BASE_DATE + 5) == 1
+
+    assert tg.calls == []
+    assert not (bound / "people" / "7.json").exists() or "questions" not in json.loads((bound / "people" / "7.json").read_text())
+    assert "ask first, show after" in capsys.readouterr().err
+
+
+def test_post_with_an_image_is_not_threaded_and_is_recorded(run, bound, tmp_path):
+    tg = FakeTelegram()
+
+    assert run("post", "Nouvelle version en ligne", "--image", image(tmp_path, "a.png"), transport=tg, now=BASE_DATE) == 0
+
+    assert "reply_parameters" not in tg.photos[0]["fields"]
+    assert tg.photos[0]["fields"]["caption"] == "Nouvelle version en ligne"
+    posts = json.loads((bound / "state.json").read_text())["posts"]
+    assert posts == [{"date": "2026-10-02T08:30:00+00:00", "text": "Nouvelle version en ligne", "message_id": 601, "images": 1}]
+
+
+def test_the_images_are_sent_while_the_lock_is_free(bound, tmp_path):
+    write_report(bound, 5)
+    channel = LockProbe(bound)
+
+    reports.cmd_reply(channel, Store(bound), GROUP_ID, RID, "regarde", BASE_DATE, images=[image(tmp_path, "a.png")])
+
+    assert channel.probed == ["send_images"] and lock_is_free(bound)
+    assert report_json(bound)["replies"][0]["images"] == ["sent/1-1.png"]

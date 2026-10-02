@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from bugs_bot.answers import show_answers
 from bugs_bot.channel import Channel, ChatId, Mention
 from bugs_bot.errors import BugsError
 from bugs_bot.followup import mark_awaiting, mark_reminded, require_due
+from bugs_bot.images import check_images, post, record_sent
 from bugs_bot.questions import asked, awaited_elsewhere, drop_closed, queue_question
 from bugs_bot.reactions import move_to, say_reaction_pending
 from bugs_bot.store import CLOSED_STATUSES, EMOJI_FIXED, EMOJI_TAKEN, OPEN_STATUSES, Store, load_report, update_report
@@ -50,6 +52,8 @@ def cmd_show(store: Store, report_id: str) -> None:
         count = f" ({edits} edit{'s' if edits > 1 else ''})" if edits else ""
         gone = f" (deleted {reply['deleted']})" if reply.get("deleted") else ""
         print(f"reply {number} {reply['date']}: {reply['text']}{count}{gone}")
+        for name in reply.get("images", []):
+            print(f"  {(path / name).resolve()}")
     for line in show_answers(store, report_id, path, report):
         print(line)
 
@@ -73,21 +77,31 @@ def mention_of(report: dict) -> Mention:
 
 
 def send_reply(
-    channel: Channel, chat_id: ChatId, store: Store, report: dict, text: str, now: float, mention: Mention | None = None
+    channel: Channel, chat_id: ChatId, store: Store, report: dict, text: str, now: float,
+    mention: Mention | None = None, images: list[Path] | None = None,
 ) -> int:
-    """Post ``text`` threaded on the report's first message, then record it in ``report.json``.
+    """Post ``text`` threaded on the report's first message, with ``images`` (checked) when given, then record it
+    in ``report.json``: the images sent are copied beside the report and listed on the reply.
 
     Returns:
         The reply's number (1-based, as ``show`` numbers them) in the report as it is now.
+
+    Raises:
+        ImagesNotSent: The text went out alone: it is recorded, without images.
     """
-    sent = channel.send(report.get("chat_id", chat_id), text, report["message_ids"][0], mention)
-    reply = {"date": datetime.fromtimestamp(now, timezone.utc).isoformat(), "text": sent["text"], "message_id": sent["message_id"]}
+    sent, shown, failure = post(channel, report.get("chat_id", chat_id), text, images or [], report["message_ids"][0], mention)
+    reply = {"date": datetime.fromtimestamp(now, timezone.utc).isoformat(), "text": sent[0]["text"], "message_id": sent[0]["message_id"]}
 
     def record(fresh: dict) -> int:
         fresh["replies"].append(reply)
+        if shown:
+            reply["images"] = record_sent(store.inbox / report["id"], len(fresh["replies"]), shown)
         return len(fresh["replies"])
 
-    return update_report(store, report["id"], record)
+    number = update_report(store, report["id"], record)
+    if failure:
+        raise failure
+    return number
 
 
 def cmd_reply(
@@ -100,6 +114,7 @@ def cmd_reply(
     tag: bool = False,
     awaits: bool = False,
     follow_up_hours: float | None = None,
+    images: list[str] | None = None,
 ) -> None:
     """Answer in the group, threaded on the report's first message; ``tag`` mentions its author.
 
@@ -107,17 +122,21 @@ def cmd_reply(
     awaited on another report not done: one question at a time (spec § 3.5), so nothing is posted and
     the question is queued on their card, for ``wait`` to hand back (``ask <id>``) once they answer.
     ``follow_up_hours`` makes it the one reminder of a wait that old (refused before anything is
-    sent when none is due).
+    sent when none is due). ``images`` go with the text, every one checked before anything is sent; a
+    question that would be queued is refused with them: ask first, show after.
     """
+    paths = check_images(images) if images else []
     _, report = load_report(store, report_id)
     if follow_up_hours is not None:
         require_due(report, follow_up_hours, now)
     other = awaited_elsewhere(store, report) if awaits else None
     if other:
+        if paths:
+            raise BugsError(f"{report['author']} already awaits {other}: a question is queued without images — ask first, show after")
         queue_question(store, report, text, now)
         print(f"queued {report_id}: {report['author']} already awaits {other}")
         return
-    number = send_reply(channel, chat_id, store, report, text, now, mention_of(report) if tag else None)
+    number = send_reply(channel, chat_id, store, report, text, now, mention_of(report) if tag else None, paths)
     if awaits:
         mark_awaiting(store, report_id, number, now)
         asked(store, report)
@@ -174,18 +193,22 @@ def cmd_done(
 
 
 def cmd_post(
-    channel: Channel, store: Store, chat_id: ChatId, text: str, now: float, mention_report: str | None = None
+    channel: Channel, store: Store, chat_id: ChatId, text: str, now: float, mention_report: str | None = None,
+    images: list[str] | None = None,
 ) -> None:
     """Post a one-off message in the group (an announcement), recorded in ``state.json``.
 
-    With ``mention_report`` (a report id) the text opens with a mention of that report's author.
+    With ``mention_report`` (a report id) the text opens with a mention of that report's author;
+    ``images`` go with it, every one checked before anything is sent (the post records their count).
     """
+    paths = check_images(images) if images else []
     mention = mention_of(load_report(store, mention_report)[1]) if mention_report else None
-    sent = channel.send(chat_id, text, None, mention)
+    sent, shown, failure = post(channel, chat_id, text, paths, None, mention)
+    entry = {"date": datetime.fromtimestamp(now, timezone.utc).isoformat(), "text": sent[0]["text"], "message_id": sent[0]["message_id"]}
     state = store.load_state()
-    state.setdefault("posts", []).append(
-        {"date": datetime.fromtimestamp(now, timezone.utc).isoformat(), "text": sent["text"], "message_id": sent["message_id"]}
-    )
+    state.setdefault("posts", []).append(entry | ({"images": len(shown)} if shown else {}))
     store.save_state(state)
-    print(f"posted message {sent['message_id']}")
+    if failure:
+        raise failure
+    print(f"posted message {sent[0]['message_id']}")
 

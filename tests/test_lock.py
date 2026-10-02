@@ -247,6 +247,10 @@ class LockProbe(FakeChannel):
         self._free("send")
         return super().send(*args, **kw)
 
+    def send_images(self, *args, **kw):
+        self._free("send_images")
+        return super().send_images(*args, **kw)
+
     def edit(self, *args, **kw):
         self._free("edit")
         return super().edit(*args, **kw)

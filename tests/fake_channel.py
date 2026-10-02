@@ -72,6 +72,10 @@ class FakeChannel:
         self.calls.append(("send", chat_id, text, reply_to, mention))
         return {"message_id": 900 + len(self.calls), "text": text}
 
+    def send_images(self, chat_id: ChatId, text: str, paths: list, reply_to: MessageId | None = None, mention: Mention | None = None) -> list[dict]:
+        self.calls.append(("send_images", chat_id, text, list(paths), reply_to, mention))
+        return [{"message_id": 900 + len(self.calls), "text": text}] + [{"message_id": 900 + len(self.calls) + k, "text": ""} for k in range(1, len(paths))]
+
     def edit(self, chat_id: ChatId, message_id: MessageId, text: str, mention: Mention | None = None) -> dict:
         self.calls.append(("edit", chat_id, message_id, text, mention))
         return {"message_id": message_id, "text": text}
