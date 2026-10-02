@@ -134,7 +134,7 @@ A message of yours that truly waits for the person's answer is posted with `--aw
 | « clos <id> <raison> » | `done <id> --reason "<raison>"` |
 | « réponse <id> <texte> » | `reply <id> "<texte>"`, then `done <id>` |
 | « demander <id> <texte> » | `reply <id> "<texte>" --mention --awaits` — a question to the reporter; the status does not change |
-| « vérifier <id> <texte> » | `reply <id> "<texte>" --mention --awaits` — the fix is deployed, the reporter is asked to verify; the status stays `taken` |
+| « vérifier <id> <texte> » | `reply <id> "<texte>" --mention --awaits` — the fix is deployed, the reporter is asked to verify; the status does not change |
 | « réécrire <id> [<N>] <contenu> » | `edit <id> "<text>" [--reply N] --mention` — the launcher gives the content, you write it in your voice (`The voice` in `SKILL.md`, after `person <id>`, never-revealed check as above); `--mention` when the message being rewritten opened with one, `--awaits` when it asks the person something. The status does not change |
 | « stop » | finish the command in hand, arm no wait, say you stood down |
 

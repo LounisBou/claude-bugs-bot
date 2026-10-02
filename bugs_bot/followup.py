@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from bugs_bot.errors import BugsError
-from bugs_bot.store import OPEN_STATUSES, Store, load_report, write_json
+from bugs_bot.store import Store, load_report, write_json
 
 
 def _iso(now: float) -> str:
@@ -61,7 +61,7 @@ def is_due(report: dict, hours: float, now: float) -> bool:
     wait = report.get("awaiting")
     return (
         bool(wait)
-        and report["status"] in OPEN_STATUSES
+        and report["status"] != "done"
         and "reminded" not in wait
         and now - _epoch(wait["since"]) >= hours * 3600
     )
@@ -72,7 +72,7 @@ def is_unanswered(report: dict, hours: float, now: float) -> bool:
     wait = report.get("awaiting")
     return (
         bool(wait)
-        and report["status"] in OPEN_STATUSES
+        and report["status"] != "done"
         and "reminded" in wait
         and "escalated" not in wait
         and now - _epoch(wait["reminded"]) >= hours * 3600
@@ -80,12 +80,12 @@ def is_unanswered(report: dict, hours: float, now: float) -> bool:
 
 
 def due(store: Store, hours: float, now: float) -> list[str]:
-    """Return the ids of the open reports whose wait is ``hours`` old or more and not yet reminded."""
+    """Return the ids of the reports not done whose wait is ``hours`` old or more and not yet reminded."""
     return [rid for rid, _, report in store.reports() if is_due(report, hours, now)]
 
 
 def unanswered(store: Store, hours: float, now: float) -> list[str]:
-    """Return the ids of the open reports still unanswered ``hours`` after their reminder, launcher not yet told."""
+    """Return the ids of the reports not done still unanswered ``hours`` after their reminder, launcher not yet told."""
     return [rid for rid, _, report in store.reports() if is_unanswered(report, hours, now)]
 
 

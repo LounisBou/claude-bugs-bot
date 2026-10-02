@@ -90,9 +90,9 @@ def test_two_people_never_block_each_other(run, laura):
     assert len(tg.sent) == 1 and "awaiting" in report(laura, MATHIS)
 
 
-def test_a_wait_on_a_closed_report_blocks_nothing(run, laura):
+def test_a_wait_on_a_done_report_blocks_nothing(run, laura):
     run("reply", FIRST, "Tu peux vérifier ?", "--awaits", now=BASE_DATE)
-    run("fixed", FIRST, now=BASE_DATE + 5)
+    run("done", FIRST, now=BASE_DATE + 5)
     tg = FakeTelegram()
 
     assert run("reply", SECOND, "Il répond au deuxième appui ?", "--awaits", transport=tg, now=BASE_DATE + 10) == 0
@@ -151,9 +151,8 @@ def test_a_reminder_is_the_question_in_flight_not_a_new_one(queued, run, laura):
 # -- a subject closed meanwhile ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize("close", [("done", SECOND), ("fixed", SECOND)])
-def test_a_queued_question_on_a_report_closed_meanwhile_is_dropped(queued, run, laura, capsys, close):
-    run(*close, now=BASE_DATE + 30)
+def test_a_queued_question_on_a_report_done_meanwhile_is_dropped(queued, run, laura, capsys):
+    run("done", SECOND, now=BASE_DATE + 30)
     laura_answers(run)
 
     assert card(laura)["questions"] == []
@@ -167,6 +166,49 @@ def test_a_queued_question_on_a_report_gone_from_disk_is_not_asked(queued, run, 
     laura_answers(run)
 
     assert not any(line.startswith("ask ") for line in wait_lines(run, capsys))
+
+
+# -- a wait on a fixed report: « vérifier » is a question like any other ----------------------
+
+
+@pytest.fixture
+def verify(run, laura) -> Path:
+    """FIRST is fixed, then Laura is asked to verify it at BASE_DATE."""
+    assert run("fixed", FIRST, now=BASE_DATE - 60) == 0
+    assert run("reply", FIRST, "Tu peux vérifier ?", "--awaits", now=BASE_DATE) == 0
+    return laura
+
+
+def test_a_wait_on_a_fixed_report_queues_the_next_question(verify, run, capsys):
+    tg = FakeTelegram()
+
+    assert run("reply", SECOND, "Il répond au deuxième appui ?", "--awaits", transport=tg, now=BASE_DATE + 10) == 0
+
+    assert tg.sent == [] and [q["report"] for q in card(verify)["questions"]] == [SECOND]
+    assert f"ask {SECOND}" not in wait_lines(run, capsys)
+
+
+def test_their_answer_on_a_fixed_report_makes_wait_print_ask(verify, run, capsys):
+    run("reply", SECOND, "Il répond au deuxième appui ?", "--awaits", now=BASE_DATE + 10)
+    laura_answers(run)
+
+    assert f"ask {SECOND}" in wait_lines(run, capsys)
+
+
+def test_a_wait_on_a_fixed_report_is_reminded_once_due(verify, run, capsys):
+    assert f"follow-up {FIRST}" not in wait_lines(run, capsys, now=BASE_DATE + 24 * HOUR - 1)
+
+    assert f"follow-up {FIRST}" in wait_lines(run, capsys, now=BASE_DATE + 24 * HOUR)
+    assert run("reply", FIRST, "Petite relance : tu as pu vérifier ?", "--follow-up", now=BASE_DATE + 24 * HOUR) == 0
+    assert f"unanswered {FIRST}" in wait_lines(run, capsys, now=BASE_DATE + 48 * HOUR)
+
+
+def test_fixed_keeps_the_queued_questions_of_the_report(queued, run, laura, capsys):
+    run("fixed", SECOND, now=BASE_DATE + 30)
+    laura_answers(run)
+
+    assert [q["report"] for q in card(laura)["questions"]] == [SECOND]
+    assert f"ask {SECOND}" in wait_lines(run, capsys)
 
 
 # -- the agent sees the queue, and keeps to one question ----------------------------------------

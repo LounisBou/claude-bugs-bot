@@ -95,7 +95,7 @@ def cmd_reply(
     """Answer in the group, threaded on the report's first message; ``tag`` mentions its author.
 
     ``awaits`` records that the reply waits for the person's answer — unless their answer is already
-    awaited on another open report: one question at a time (spec § 3.5), so nothing is posted and
+    awaited on another report not done: one question at a time (spec § 3.5), so nothing is posted and
     the question is queued on their card, for ``wait`` to hand back (``ask <id>``) once they answer.
     ``follow_up_hours`` makes it the one reminder of a wait that old (refused before anything is
     sent when none is due).
@@ -232,7 +232,6 @@ def cmd_fixed(channel: Channel, store: Store, chat_id: int, report_id: str, note
     if note:
         report["fix_ref"] = note
         write_json(path / "report.json", report)
-    drop_closed(store, report)
     print(f"fixed {report_id}")
     return say_reaction_pending(channel, failure)
 
