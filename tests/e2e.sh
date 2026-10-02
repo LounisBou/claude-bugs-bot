@@ -134,7 +134,8 @@ check "beta untouched by alpha's work" "$(bb list --project beta | wc -l | tr -d
 bb handover write "alpha: Ana waits for a check of the button" > /dev/null
 [ -f "$BUGS_BOT_HOME/alpha/handover.md" ] || fail "handover write left no note"
 bb handover read | grep -q "Ana waits" || fail "handover read lost the note"
-check "second read" "$(bb handover read)" "no handover note"
+second=$(bb handover read)
+check "second read" "${second%%: /*}" "no unread handover note; last archived"
 check "beta has no note" "$(bb handover read --project beta)" "no handover note"
 
 echo "E2E OK"
