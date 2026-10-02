@@ -80,6 +80,7 @@ def build_parser(description: str) -> argparse.ArgumentParser:
     sub.add_parser("pending", parents=[project], help="triaged reports neither fixed nor done, and the overdue waits")
     sub.add_parser("overdue", parents=[project], help="the follow-ups due and the waits unanswered after their reminder")
     sub.add_parser("escalated", parents=[project], help="the launcher was told a wait stays unanswered").add_argument("id")
+    sub.add_parser("unask", parents=[project], help="drop the question queued about a report: it no longer needs asking").add_argument("id")
     post = sub.add_parser("post", parents=[project], help="post a one-off message in the group")
     post.add_argument("text")
     post.add_argument("--mention", metavar="REPORT_ID", help="open with a mention of that report's author")

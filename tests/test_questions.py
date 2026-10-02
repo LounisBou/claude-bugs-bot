@@ -296,6 +296,29 @@ def test_a_person_without_user_id_is_asked_once_free(nameless, run, capsys):
     assert wait_lines(run, capsys).count(f"ask {SECOND}") == 1
 
 
+# -- a queued question the agent judges moot -----------------------------------------------------
+
+
+def test_unask_drops_the_queued_question_and_wait_no_longer_asks_it(queued, run, laura, capsys):
+    capsys.readouterr()
+
+    assert run("unask", SECOND) == 0
+
+    assert capsys.readouterr().out == f"unasked {SECOND}\n"
+    assert card(laura)["questions"] == []
+    laura_answers(run)
+    assert not any(line.startswith("ask ") for line in wait_lines(run, capsys))
+
+
+def test_unask_is_refused_when_nothing_is_queued(queued, run, laura, capsys):
+    capsys.readouterr()
+
+    assert run("unask", FIRST) == 1
+
+    assert capsys.readouterr().err == f"bugs-bot: no question queued about {FIRST}\n"
+    assert [q["report"] for q in card(laura)["questions"]] == [SECOND]
+
+
 # -- the agent sees the queue, and keeps to one question ----------------------------------------
 
 
@@ -310,6 +333,7 @@ def test_person_shows_the_queued_questions(queued, run, capsys):
 @pytest.mark.parametrize("phrase", [
     "One question per message, one subject per person at a time",
     "`ask <id>`",
+    "A queued question that no longer needs asking (the subject moved on): `unask <id>`.",
     "queued <id>: <author> already awaits <other id>",
     "Their other subjects are worked on in parallel without asking",
 ])

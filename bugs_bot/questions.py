@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from bugs_bot.errors import BugsError
 from bugs_bot.people import card_key, card_of, load_person, save_person
-from bugs_bot.store import Store
+from bugs_bot.store import Store, load_report
 
 
 def _awaited(reports: list[tuple[str, object, dict]], key: str, exclude: str | None) -> str | None:
@@ -75,6 +76,18 @@ def asked(store: Store, report: dict) -> None:
 def drop_closed(store: Store, report: dict) -> None:
     """Drop the question queued about ``report``: it is done, there is nothing left to ask."""
     _remove(store, report)
+
+
+def cmd_unask(store: Store, report_id: str) -> None:
+    """Drop the question queued about a report that no longer needs asking: the subject moved on.
+
+    Raises:
+        BugsError: If no question is queued about the report.
+    """
+    _, report = load_report(store, report_id)
+    if not _remove(store, report):
+        raise BugsError(f"no question queued about {report_id}")
+    print(f"unasked {report_id}")
 
 
 def asks(store: Store) -> list[str]:
