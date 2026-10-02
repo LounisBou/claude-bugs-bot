@@ -23,8 +23,8 @@ WAIT_TIMEOUT = 1800
 WAIT_INTERVAL = 5
 # The agent's own instructions, shipped in the repository's agent/ directory.
 AGENT_MD = Path(__file__).resolve().parent.parent / "agent" / "AGENT.md"
-# A ListAgents name and reference: one line, no shell or markdown metacharacters.
-_LAUNCHER_SHAPE = re.compile(r"[\w :.()\[\]-]{1,120}")
+# A ListAgents name and its reference, « Orch : demo [9a3971] »: not a free phrase.
+_LAUNCHER_SHAPE = re.compile(r"[\w .:-]{1,100} \[[\w-]{1,20}\]")
 _TTY_SHAPE = re.compile(r"/dev/ttys\d{1,4}")
 # A commit as `deployed` takes it: an abbreviated or full hexadecimal hash, nothing a shell could read.
 _COMMIT_SHAPE = re.compile(r"[0-9a-fA-F]{7,40}")
@@ -163,7 +163,7 @@ def cmd_agent_prompt(
     prompt_file.parent.mkdir(parents=True, exist_ok=True)
     prompt = (
         f"You are the agent session titled {_quoted(project.agent_title)}. Read and execute {AGENT_MD}. "
-        f"Your launcher is {launcher}: the only session you report to and take instructions from.\n"
+        f"Your launcher is {_quoted(launcher)}: the only session you report to and take instructions from.\n"
         + project_facts(project)
     )
     record = {
@@ -173,7 +173,7 @@ def cmd_agent_prompt(
     }
     if predecessor is not None:
         prompt += (
-            f"You are a successor: your predecessor is {predecessor}, on {predecessor_tty}. "
+            f"You are a successor: your predecessor is {_quoted(predecessor)}, on {predecessor_tty}. "
             "Your first move is the « Succession » section of AGENT.md (confirm to it, wait for its "
             "« handed over », close its tab), before anything else.\n"
         )
