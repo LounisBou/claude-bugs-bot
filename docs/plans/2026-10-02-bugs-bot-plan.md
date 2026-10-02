@@ -286,8 +286,10 @@ def cmd_pull(channel: Channel | None, machine: Machine, now: float, poll_timeout
 ```
 
 **Behaviour:**
-- Pull reads the registry every round; empty registry → one line « no project registered » and
-  exit 0 (single pull) / wait `UNBOUND_WAIT` (watch) — today's unbound behaviour, now keyed on the registry.
+- Pull reads the registry every round; an empty registry still polls (spec § 3.2: an unregistered
+  chat is dropped AND logged, which is how `init` finds the first group while Pull runs) — every chat
+  goes to `unregistered.json`, the offset advances. (Amended after review: an earlier text kept
+  today's `UNBOUND_WAIT` sleep, which left the first project undiscoverable while Pull ran.)
 - Each message of a registered chat → that project's inbox (media groups, 👀, pending reactions
   retried per project, 30-day purge per project — unchanged).
 - A message of an unregistered group chat → `note_unregistered` + one stderr line
@@ -342,7 +344,7 @@ def discover_groups(channel: Channel | None, machine: Machine, pull_running: boo
     # pull_running → machine.unregistered() only, NO getUpdates;
     # else getUpdates WITHOUT offset (consumes nothing) through chats_seen(), merged with unregistered()
 def cmd_init(channel: Channel | None, machine: Machine, repo: Path, args: InitArgs, pull_running: bool) -> int
-def cmd_remove(machine: Machine, project: Project) -> None  # registry entry removed; prints the data dir and project file kept
+def cmd_remove(machine: Machine, project: str) -> None      # by registry name, the project file need not load; prints the data dir and project file kept
 
 # bugs_bot/doctor.py
 @dataclass(frozen=True)
