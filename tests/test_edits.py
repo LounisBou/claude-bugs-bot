@@ -9,10 +9,11 @@ from pathlib import Path
 from conftest import read_offset, register, reports
 from fake_channel import FakeChannel, author, batch, inbound
 from fake_slack import CHANNEL, FakeSlack, msg, ts
-from samples import BASE_DATE, GROUP_ID, FakeTelegram, message
+from samples import BASE_DATE, GROUP_ID, OTHER_GROUP_ID, FakeTelegram, message
 from test_mention import STAMP, write_report
 
 from bugs_bot import cli, edits, pull
+from bugs_bot import reports as reports_
 from bugs_bot.store import EMOJI_TAKEN, Machine, Store, update_report
 
 REPORT = f"{STAMP}-10"
@@ -118,6 +119,17 @@ def test_an_edit_delivered_again_is_recorded_once(bound, run):
     assert read(bound)["edits"] == [{"date": iso(BASE_DATE + 60), "message_id": 10, "previous": "avant", "seen": False}]
 
 
+def test_an_edit_of_the_same_message_id_in_another_chat_writes_nothing(bound, capsys):
+    write_report(bound, 10, text="avant")
+    before = (bound / "inbox" / REPORT / "report.json").read_bytes()
+
+    found = edits.record_edit(Store(bound), OTHER_GROUP_ID, inbound(OTHER_GROUP_ID, 10, "ailleurs", date=BASE_DATE + 60, edited=True))
+
+    assert found is None
+    assert (bound / "inbox" / REPORT / "report.json").read_bytes() == before
+    assert capsys.readouterr().out == ""
+
+
 def test_an_edit_is_written_on_the_report_as_it_is_now(bound, monkeypatch):
     # The agent triages the report right after Pull read the inbox to find it: both changes land.
     write_report(bound, 10, text="avant")
@@ -159,6 +171,25 @@ def test_an_edit_of_a_thread_answer_goes_to_that_answer(tmp_path, bugs_home):
     assert after["text"] == "le bouton"
     assert [a["text"] for a in after["answers"]] == ["iPhone SE, iOS 17"]
     assert after["edits"] == [{"date": iso(BASE_DATE + 950), "message_id": ts(900), "previous": "iphone", "seen": False}]
+
+
+def test_show_prints_an_edit_of_a_thread_answer_from_its_previous_to_its_new_text(tmp_path, bugs_home, capsys):
+    register(bugs_home, tmp_path / "repo-sla", "sla", CHANNEL, "sla-bugs", channel="slack")
+    machine = Machine(bugs_home)
+    report = inbound(CHANNEL, ts(1), "le bouton", author=ANA, date=BASE_DATE + 1)
+    answer = inbound(CHANNEL, ts(900), "iphone", author=ANA, date=BASE_DATE + 900, thread_of=ts(1))
+    pull.cmd_pull(FakeChannel(batch(report, answer), kind="slack"), machine, BASE_DATE + 1000)
+    again = inbound(CHANNEL, ts(900), "iPhone SE, iOS 17", author=ANA, date=BASE_DATE + 950, thread_of=ts(1), edited=True)
+    pull.cmd_pull(FakeChannel(batch(again), kind="slack"), machine, BASE_DATE + 1000)
+    store = machine.project_store("sla")
+    ((report_id, _, _),) = store.reports()
+    capsys.readouterr()
+
+    reports_.cmd_show(store, report_id)
+
+    shown = capsys.readouterr().out
+    assert "modifié : iphone → iPhone SE, iOS 17" in shown
+    assert "le bouton" in shown.splitlines()[1]  # the report's own text is not the answer's
 
 
 def changed(edit_ts: str, original_ts: str, text: str, **inner) -> dict:
