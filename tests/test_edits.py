@@ -166,6 +166,27 @@ def test_an_edit_delivered_again_is_recorded_once(bound, run):
     assert read(bound)["edits"] == [{"date": iso(BASE_DATE + 60), "message_id": 10, "previous": "avant", "seen": False}]
 
 
+def test_an_edit_replayed_after_a_later_one_is_never_recorded_again(bound, run, capsys):
+    # A batch delivered again (the cursor held after a failure) brings back edits already recorded.
+    tg = FakeTelegram([message(1, 10, text="A")])
+    assert run("pull", transport=tg) == 0
+    update_report(Store(bound), REPORT, lambda report: report.update(kind="bug"))  # wait announces it no more
+    tg.updates += [edited(2, 10, BASE_DATE + 60, text="B"), edited(3, 10, BASE_DATE + 120, text="C")]
+    assert run("pull", transport=tg) == 0
+    assert run("show", REPORT) == 0
+    capsys.readouterr()
+    tg.updates += [edited(4, 10, BASE_DATE + 60, text="B"), edited(5, 10, BASE_DATE + 120, text="C")]
+
+    assert run("pull", transport=tg) == 0
+
+    after = read(bound)
+    assert after["text"] == "C"
+    assert [(e["previous"], e["date"]) for e in after["edits"]] == [("A", iso(BASE_DATE + 60)), ("B", iso(BASE_DATE + 120))]
+    assert "edited" not in capsys.readouterr().out
+    assert run("wait", "--timeout", "0") == 0
+    assert capsys.readouterr().out == ""
+
+
 def test_an_edit_of_the_same_message_id_in_another_chat_writes_nothing(bound, capsys):
     write_report(bound, 10, text="avant")
     before = (bound / "inbox" / REPORT / "report.json").read_bytes()

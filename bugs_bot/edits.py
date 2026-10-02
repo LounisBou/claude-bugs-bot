@@ -34,7 +34,8 @@ def record_edit(store: Store, chat_id: ChatId, msg: InboundMessage) -> str | Non
     A member of a media group corrects its own text only, and the report's text is joined again. A report
     written before its members' texts were recorded, with several members, keeps its text: the edit holds
     the new one. ``None`` when no report records that message (logged at debug level only), when the
-    report was purged meanwhile, or when the text recorded is already this one (an edit delivered again).
+    report was purged meanwhile, when the text recorded is already this one, or when this edit, or a later
+    one of that message, is already recorded (a batch delivered again).
     """
     report_id = find_by_message(store, chat_id, msg.message_id)
     if report_id is None:
@@ -45,6 +46,8 @@ def record_edit(store: Store, chat_id: ChatId, msg: InboundMessage) -> str | Non
     def replace(report: dict) -> bool:
         # Read again under the lock: the report as it is now, not as it was found.
         recorded = [e for e in report.get("edits", []) if e.get("message_id") == msg.message_id]
+        if any(when <= datetime.fromisoformat(e["date"]) for e in recorded):
+            return False
         edit = {"date": when.isoformat(), "message_id": msg.message_id}
         message_ids = report.get("message_ids", [])
         if msg.message_id in message_ids and "texts" in report:
