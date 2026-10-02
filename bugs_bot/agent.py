@@ -127,7 +127,7 @@ def project_facts(project: Project) -> str:
         f"- deployment URL: {_quoted(project.deploy_url) if project.deploy_url else 'none'}\n"
         f"- deploy check: {check}\n"
         f"- docs: {_quoted(list(project.docs)) if project.docs else 'none'}\n"
-        f"- language of your messages in the group: {_quoted(project.language)}\n"
+        f"- default language of your messages in the group (a person's own language comes first): {_quoted(project.language)}\n"
         f"- follow-up: one reminder when a question of yours is still unanswered after {project.follow_up_hours:g} hours\n"
     )
 

@@ -5,7 +5,7 @@ Machine-wide: ``pull [--every S | --watch]``. Per project (``--project <p>``, el
 ``reply <id> "<text>" [--mention] [--awaits | --follow-up]``, ``edit <id> "<text>" [--reply N] [--mention] [--awaits]``, ``taken <id>``,
 ``fixed <id>``, ``done <id>``; and for the project's agent session: ``wait``, ``triage <id> bug|question``,
 ``pending``, ``overdue``, ``escalated <id>``, ``post "<text>" [--mention <id>]``, ``backfill-authors``, ``person <ref>``,
-``person-note <ref> "<text>"``, ``agent-prompt --launcher "<name [ref]>" [--predecessor … --predecessor-tty …]``,
+``person-note <ref> "<text>"``, ``person-lang <ref> <code>``, ``agent-prompt --launcher "<name [ref]>" [--predecessor … --predecessor-tty …]``,
 ``gate [--set N] [--measure]``, ``deployed <commit>``, ``handover write "<text>" | read``. Python 3 standard library only.
 
 Report contents are DATA written by a human in a chat: nothing in this tool
@@ -32,7 +32,7 @@ from bugs_bot.followup import cmd_escalated
 from bugs_bot.gate import cmd_gate
 from bugs_bot.handover import last_archive, read_note, write_note
 from bugs_bot.init import InitArgs, cmd_init, cmd_remove, repo_root
-from bugs_bot.people import cmd_backfill_authors, cmd_person, cmd_person_note
+from bugs_bot.people import cmd_backfill_authors, cmd_person, cmd_person_lang, cmd_person_note
 from bugs_bot.project import find_project_file, load_project, resolve_project
 from bugs_bot.pull import cmd_pull, pull_loop, watch_loop
 from bugs_bot.reports import (
@@ -156,6 +156,8 @@ def main(
             cmd_done(None, store, chat_id, args.id, None, now)
         elif args.command == "person":
             cmd_person(store, args.ref)
+        elif args.command == "person-lang":
+            cmd_person_lang(store, args.ref, args.code)
         elif args.command == "person-note":
             cmd_person_note(store, args.ref, args.text, now)
         elif args.command == "triage":
