@@ -172,3 +172,12 @@ def test_resolve_refuses_a_registered_project_whose_file_is_gone(tmp_path):
     registry.add(-1, "demo", tmp_path / "gone")
     with pytest.raises(BugsError, match="demo"):
         resolve_project("demo", tmp_path, registry)
+
+
+def test_resolve_by_name_refuses_a_file_that_declares_another_project(tmp_path):
+    repo = tmp_path / "repo"
+    write_project(repo, MINIMAL | {"project": "other"})
+    registry = Registry(tmp_path / "projects.json")
+    registry.add(-100123, "demo", repo)
+    with pytest.raises(BugsError, match="demo.*other|other.*demo"):
+        resolve_project("demo", tmp_path, registry)

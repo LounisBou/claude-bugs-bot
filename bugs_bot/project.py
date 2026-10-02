@@ -158,7 +158,8 @@ def resolve_project(name: str | None, cwd: Path, registry: Registry) -> Project:
     """Return the project named ``name`` (through the registry), else the one of ``cwd`` or a parent.
 
     Raises:
-        BugsError: If no project file is found, the name is not registered, or the file cannot be loaded.
+        BugsError: If no project file is found, the name is not registered, the file cannot be loaded,
+            or the file declares another project than the registry's.
     """
     if name is not None:
         found = registry.by_project(name)
@@ -167,7 +168,10 @@ def resolve_project(name: str | None, cwd: Path, registry: Registry) -> Project:
         path = found[1].repo / PROJECT_FILE
         if not path.is_file():
             raise BugsError(f"project {name} is registered but {path} is missing: run /bugs-bot:init")
-        return load_project(path)
+        project = load_project(path)
+        if project.project != name:
+            raise BugsError(f"{path} declares project {project.project}, not {name}: fix the file or the registry")
+        return project
     path = find_project_file(cwd)
     if path is None:
         raise BugsError("no .bugs-bot.json here or above: run /bugs-bot:init")
