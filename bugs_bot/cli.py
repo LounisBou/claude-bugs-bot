@@ -29,7 +29,7 @@ from bugs_bot.errors import BugsError
 from bugs_bot.gate import cmd_gate
 from bugs_bot.init import InitArgs, cmd_init, cmd_remove, repo_root
 from bugs_bot.people import cmd_person, cmd_person_note
-from bugs_bot.project import resolve_project
+from bugs_bot.project import find_project_file, load_project, resolve_project
 from bugs_bot.pull import POLL_TIMEOUT, cmd_pull, pull_loop, watch_loop
 from bugs_bot.reports import (
     cmd_backfill_authors,
@@ -52,6 +52,21 @@ def read_ps() -> str:
         return subprocess.run(["ps", "-eo", "pid=,command="], capture_output=True, text=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError) as exc:
         raise BugsError(f"cannot read the process table: {exc}") from None
+
+
+def _project_of_cwd(machine: Machine) -> str:
+    """Return the project of the current directory: the registry's entry for its repository, else its file's.
+
+    Raises:
+        BugsError: If there is no project file here or above and no entry for it.
+    """
+    path = find_project_file(Path.cwd())
+    if path is None:
+        raise BugsError("no .bugs-bot.json here or above: pass --project")
+    for entry in machine.registry.entries().values():
+        if entry.repo.resolve() == path.parent.resolve():
+            return entry.project
+    return load_project(path).project
 
 
 def _int_arg(text: str) -> int:
@@ -201,12 +216,13 @@ def main(
                 gate_tokens=args.gate_tokens,
             )
             return cmd_init(channel, machine, repo, given, bool(pull_processes(read_ps())))
+        if args.command == "remove":
+            cmd_remove(machine, args.project or _project_of_cwd(machine))
+            return 0
         project = resolve_project(args.project, Path.cwd(), machine.registry)
         store, chat_id = machine.project_store(project.project), project.chat_id
         # Commands that read or write the inbox only, never the network.
-        if args.command == "remove":
-            cmd_remove(machine, project)
-        elif args.command == "list":
+        if args.command == "list":
             cmd_list(store)
         elif args.command == "show":
             cmd_show(store, args.id)

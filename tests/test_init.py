@@ -410,6 +410,40 @@ def test_init_rerun_on_an_unreadable_project_file_is_refused_not_overwritten(rep
     assert (repo / PROJECT_FILE).read_text() == "{not json"
 
 
+def test_init_refuses_a_project_id_registered_for_another_repository(repo, machine, tmp_path):
+    other = tmp_path / "other-repo"
+    other.mkdir()
+    git(other, "init", "-q")
+    cmd_init(None, machine, other, args(), pull_running=False)
+    before = (machine.registry.path.read_text(), (other / PROJECT_FILE).read_text())
+
+    with pytest.raises(BugsError, match=str(other)):
+        cmd_init(None, machine, repo, args(chat_id=OTHER_GROUP_ID, title="Elsewhere"), pull_running=False)
+
+    assert (machine.registry.path.read_text(), (other / PROJECT_FILE).read_text()) == before
+    assert not (repo / PROJECT_FILE).exists()
+
+
+def test_init_validates_before_writing_anything(repo, machine):
+    with pytest.raises(BugsError, match="gate_tokens"):
+        cmd_init(None, machine, repo, args(gate_tokens=0), pull_running=False)
+
+    assert not (repo / PROJECT_FILE).exists()
+    assert machine.registry.entries() == {}
+
+
+def test_cli_init_with_an_invalid_value_exits_1_and_writes_nothing(run, repo, bugs_home, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "read_ps", lambda: "")
+    monkeypatch.chdir(repo)
+
+    code = run("init", "--project", "demo", "--agent-title", "A", "--chat-id", "-5", "--title", "T", "--gate-tokens", "0")
+
+    assert code == 1
+    assert not (repo / PROJECT_FILE).exists()
+    assert Registry(bugs_home / "projects.json").entries() == {}
+    assert "gate_tokens" in capsys.readouterr().err
+
+
 # -- remove ---------------------------------------------------------------------
 
 
@@ -419,7 +453,7 @@ def test_remove_drops_the_registry_entry_and_keeps_data_and_file(repo, machine, 
     (data / "inbox").mkdir(parents=True)
     capsys.readouterr()
 
-    cmd_remove(machine, load_project(repo / PROJECT_FILE))
+    cmd_remove(machine, "demo")
 
     assert machine.registry.entries() == {}
     assert (data / "inbox").is_dir() and (repo / PROJECT_FILE).is_file()
@@ -432,9 +466,62 @@ def test_remove_of_an_unregistered_project_says_so(repo, machine, capsys):
     machine.registry.remove("demo")
     capsys.readouterr()
 
-    cmd_remove(machine, load_project(repo / PROJECT_FILE))
+    cmd_remove(machine, "demo")
 
     assert "not registered" in capsys.readouterr().out
+
+
+def test_remove_never_needs_the_project_file(repo, machine, capsys):
+    cmd_init(None, machine, repo, args(), pull_running=False)
+    data = machine.project_store("demo").home
+    (data / "inbox").mkdir(parents=True)
+    (repo / PROJECT_FILE).unlink()
+
+    cmd_remove(machine, "demo")
+
+    assert machine.registry.entries() == {}
+    assert (data / "inbox").is_dir()
+
+
+def test_cli_remove_by_name_with_a_missing_project_file(run, repo, bugs_home, no_pull, monkeypatch):
+    monkeypatch.chdir(repo)
+    run("init", "--project", "demo", "--agent-title", "A", "--chat-id", "-5", "--title", "T")
+    (repo / PROJECT_FILE).unlink()
+    monkeypatch.chdir(repo.parent)
+
+    assert run("remove", "--project", "demo") == 0
+
+    assert Registry(bugs_home / "projects.json").entries() == {}
+
+
+def test_cli_remove_by_name_with_a_corrupt_project_file_keeps_it(run, repo, bugs_home, no_pull, monkeypatch):
+    monkeypatch.chdir(repo)
+    run("init", "--project", "demo", "--agent-title", "A", "--chat-id", "-5", "--title", "T")
+    (repo / PROJECT_FILE).write_text("{corrupt")
+    (bugs_home / "demo").mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(repo.parent)
+
+    assert run("remove", "--project", "demo") == 0
+
+    assert Registry(bugs_home / "projects.json").entries() == {}
+    assert (repo / PROJECT_FILE).read_text() == "{corrupt"
+    assert (bugs_home / "demo").is_dir()
+
+
+def test_cli_remove_from_the_repository_with_a_corrupt_file(run, repo, bugs_home, no_pull, monkeypatch):
+    monkeypatch.chdir(repo)
+    run("init", "--project", "demo", "--agent-title", "A", "--chat-id", "-5", "--title", "T")
+    (repo / PROJECT_FILE).write_text("{corrupt")
+
+    assert run("remove") == 0
+
+    assert Registry(bugs_home / "projects.json").entries() == {}
+
+
+def test_cli_remove_of_an_unknown_project_says_so(run, no_pull, capsys):
+    assert run("remove", "--project", "ghost") == 0
+
+    assert "not registered: ghost" in capsys.readouterr().out
 
 
 # -- through the CLI ------------------------------------------------------------

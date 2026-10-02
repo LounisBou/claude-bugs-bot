@@ -10,7 +10,7 @@ from pathlib import Path
 from bugs_bot.channel import Channel
 from bugs_bot.errors import BugsError
 from bugs_bot.jsonio import write_json
-from bugs_bot.project import PROJECT_FILE, Project, _build, dump_project, load_project
+from bugs_bot.project import PROJECT_FILE, Project, build_project, dump_project, find_project_file, load_project
 from bugs_bot.pull import chats_seen
 from bugs_bot.store import Machine
 
@@ -165,7 +165,10 @@ def cmd_init(channel: Channel | None, machine: Machine, repo: Path, args: InitAr
     }
     project = replace(base, **given)
     data = dump_project(project)
-    _build(data, repo)  # the same validation as a load, before anything is written
+    build_project(data, repo)  # the same validation as a load, before anything is written
+    held = machine.registry.by_project(project.project)
+    if held and held[1].repo.resolve() != repo.resolve():
+        raise BugsError(f"project {project.project} is already registered for {held[1].repo}: run remove there first")
     machine.registry.add(project.chat_id, project.project, repo)
     write_json(path, data)
     if add_exclude(repo):
@@ -175,8 +178,15 @@ def cmd_init(channel: Channel | None, machine: Machine, repo: Path, args: InitAr
     return 0
 
 
-def cmd_remove(machine: Machine, project: Project) -> None:
-    """Unregister a project: Pull stops routing its group; its data and project file stay."""
-    removed = machine.registry.remove(project.project)
-    print(f"{'unregistered' if removed else 'not registered'}: {project.project}")
-    print(f"kept: {machine.project_store(project.project).home} (data), {project.repo / PROJECT_FILE} (project file)")
+def cmd_remove(machine: Machine, project: str) -> None:
+    """Unregister a project by name: Pull stops routing its group; its data and project file stay.
+
+    The project file is never read: a missing or corrupt one must not keep a vanished repository routed.
+    """
+    found = machine.registry.by_project(project)
+    machine.registry.remove(project)
+    print(f"{'unregistered' if found else 'not registered'}: {project}")
+    kept = [f"{machine.project_store(project).home} (data)"]
+    if found:
+        kept.append(f"{found[1].repo / PROJECT_FILE} (project file)")
+    print("kept: " + ", ".join(kept))
