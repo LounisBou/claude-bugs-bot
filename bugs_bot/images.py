@@ -17,6 +17,7 @@ MAX_IMAGES = 10
 MAX_BYTES = 10 * 1024 * 1024
 # The formats both platforms show inline, told by their first bytes (a name proves nothing).
 _MAGIC = ((b"\x89PNG\r\n\x1a\n", ".png"), (b"\xff\xd8\xff", ".jpg"))
+_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp"}
 
 
 def extension_of(head: bytes) -> str | None:
@@ -27,6 +28,16 @@ def extension_of(head: bytes) -> str | None:
     if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
         return ".webp"
     return None
+
+
+def wire_file(path: Path, rank: int) -> tuple[str, bytes, str]:
+    """Return what a channel uploads for the ``rank``-th image (1-based): ``(name, bytes, content type)``.
+
+    The name is a neutral ``image-<k>.<ext>``: the file's own name may tell a local detail, and the group sees it.
+    """
+    data = path.read_bytes()
+    ext = extension_of(data[:12]) or ".png"
+    return f"image-{rank}{ext}", data, _TYPES[ext]
 
 
 def _problem(path: Path) -> str | None:

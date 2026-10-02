@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
-from bugs_bot.channel import Author, Batch, ChatId, Mention, MessageId, Transport, checked_root
+from bugs_bot.channel import Author, Batch, ChatId, ImagesNotSent, Mention, MessageId, Transport, Upload, checked_root, multipart
 from bugs_bot.errors import BugsError
 from bugs_bot.envfile import read_secret
+from bugs_bot.images import wire_file
 from bugs_bot.telegram_inbound import ALLOWED_UPDATES, to_author, to_batch
 
 DEFAULT_API_ROOT = "https://api.telegram.org"
 # A held getUpdates request is read this much longer than Telegram holds it, so it is never cut.
 POLL_READ_MARGIN = 10
+# A photo's caption, in UTF-16 code units (the mention included): a longer text is posted before the images.
+CAPTION_MAX = 1024
 
 
 def api_root(env: Mapping[str, str]) -> str:
@@ -70,12 +74,13 @@ class Api:
         """The token, for masking only."""
         return self._token
 
-    def call(self, method: str, *, http_timeout: float | None = None, **params: Any) -> Any:
+    def call(self, method: str, *, http_timeout: float | None = None, form: Upload | None = None, **params: Any) -> Any:
         """Call a Bot API method and return its ``result``.
 
         Args:
             method: Method name, e.g. ``getUpdates``.
             http_timeout: Read timeout for a request Telegram holds open (long polling).
+            form: A multipart body, sent instead of ``params`` (a file upload).
             **params: JSON parameters.
 
         Returns:
@@ -85,7 +90,8 @@ class Api:
             BugsError: On ``ok: false`` (whatever the HTTP status) or an unreadable answer.
         """
         url = f"{self._root}/bot{self._token}/{method}"
-        status, body = self._transport(url, params) if http_timeout is None else self._transport(url, params, http_timeout)
+        payload = params if form is None else form
+        status, body = self._transport(url, payload) if http_timeout is None else self._transport(url, payload, http_timeout)
         try:
             answer = json.loads(body)
         except ValueError:
@@ -163,6 +169,43 @@ class TelegramChannel:
             extra["reply_parameters"] = {"message_id": reply_to}
         sent = self._api.call("sendMessage", chat_id=chat_id, text=text, **extra)
         return {"message_id": sent["message_id"], "text": text}
+
+    def send_images(
+        self, chat_id: ChatId, text: str, paths: list[Path], reply_to: MessageId | None = None, mention: Mention | None = None
+    ) -> list[dict]:
+        """Post images with ``text``: ``sendPhoto`` for one, ``sendMediaGroup`` for several (the caption on the first).
+
+        A caption longer than ``CAPTION_MAX`` is posted first as a message, the images after it on the same thread.
+
+        Raises:
+            ImagesNotSent: The text went out first and the images failed.
+            BugsError: Nothing was posted.
+        """
+        caption, entities = with_mention(mention, text) if mention else (text, [])
+        posted = []
+        if utf16_len(caption) > CAPTION_MAX:
+            posted.append(self.send(chat_id, text, reply_to, mention))
+            caption, entities = "", []
+        fields = {"chat_id": str(chat_id)}
+        if reply_to is not None:
+            fields["reply_parameters"] = json.dumps({"message_id": reply_to})
+        files = [wire_file(path, rank) for rank, path in enumerate(paths, 1)]
+        try:
+            if len(files) == 1:
+                fields |= {"caption": caption} if caption else {}
+                fields |= {"caption_entities": json.dumps(entities)} if entities else {}
+                sent = [self._api.call("sendPhoto", form=multipart(fields, [("photo", *files[0])]))]
+            else:
+                media: list[dict[str, Any]] = [{"type": "photo", "media": f"attach://image{rank}"} for rank in range(1, len(files) + 1)]
+                media[0] |= {"caption": caption} if caption else {}
+                media[0] |= {"caption_entities": entities} if entities else {}
+                fields["media"] = json.dumps(media, ensure_ascii=False)
+                sent = self._api.call("sendMediaGroup", form=multipart(fields, [(f"image{rank}", *file) for rank, file in enumerate(files, 1)]))
+        except BugsError as exc:
+            if posted:
+                raise ImagesNotSent(f"the text was posted alone, not the images: {exc}", posted[0]) from None
+            raise
+        return posted + [{"message_id": message["message_id"], "text": caption if not rank else ""} for rank, message in enumerate(sent)]
 
     def edit(self, chat_id: ChatId, message_id: MessageId, text: str, mention: Mention | None = None) -> dict:
         """Rewrite a posted message; Telegram's « message is not modified » is raised as ``BugsError``."""

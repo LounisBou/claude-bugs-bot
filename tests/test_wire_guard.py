@@ -12,6 +12,7 @@ from conftest import REPO_ROOT
 # Telegram's Bot API: its host, its methods, the update fields read, its token's variable.
 TELEGRAM_WIRE = re.compile(
     r"api\.telegram\.org|getUpdates|sendMessage|editMessageText|deleteMessage|setMessageReaction|getFile"
+    r"|sendPhoto|sendMediaGroup|caption_entities|attach://"
     r"|getChatAdministrators|getChatMemberCount|getMe|update_id|migrate_to_chat_id|migrate_from_chat_id"
     r"|media_group_id|language_code|reply_parameters|text_mention|TELEGRAM_BOT_TOKEN|is_bot|\[.from.\]"
 )
