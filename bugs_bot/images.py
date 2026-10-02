@@ -8,7 +8,6 @@ person saw.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from bugs_bot.channel import Channel, ChatId, ImagesNotSent, Mention, MessageId
@@ -84,36 +83,43 @@ def check_images(paths: list[str]) -> list[Path]:
 
 def post(
     channel: Channel, chat_id: ChatId, text: str, paths: list[Path], reply_to: MessageId | None = None, mention: Mention | None = None
-) -> tuple[list[dict], list[Path], ImagesNotSent | None]:
+) -> tuple[dict, list[tuple[str, bytes, str]], ImagesNotSent | None]:
     """Send ``text`` alone, or with ``paths`` (checked already) when there are some.
 
     Returns:
-        ``(messages posted, images posted, failure)``: the failure is the images lost after their text went
-        out alone — the caller records what was posted, then raises it.
+        ``(what was posted, images sent, failure)``. What was posted is ``{"text", "message_id"}`` for a
+        message; with images, ``message_ids`` lists every message (the first is ``message_id``) and, on a
+        platform that keeps files apart, ``file_ids`` names them — no ``message_id`` when no message is
+        known. The images are ``(name, bytes, content type)`` as sent. The failure is the images lost
+        after their text went out alone — the caller records what was posted, then raises it.
 
     Raises:
         BugsError: Nothing was posted.
     """
     if not paths:
-        return [channel.send(chat_id, text, reply_to, mention)], [], None
+        sent = channel.send(chat_id, text, reply_to, mention)
+        return {"text": sent["text"], "message_id": sent["message_id"]}, [], None
     try:
-        return channel.send_images(chat_id, text, paths, reply_to, mention), paths, None
+        shown = channel.send_images(chat_id, text, paths, reply_to, mention)
     except ImagesNotSent as exc:
-        return [exc.sent], [], exc
+        return {"text": exc.sent["text"], "message_id": exc.sent["message_id"]}, [], exc
+    posted: dict = {"text": shown.text}
+    if shown.message_ids:
+        posted |= {"message_id": shown.message_ids[0], "message_ids": shown.message_ids}
+    if shown.file_ids:
+        posted["file_ids"] = shown.file_ids
+    return posted, shown.files, None
 
 
-def record_sent(report_dir: Path, reply_number: int, paths: list[Path]) -> list[str]:
-    """Copy the images sent with reply ``reply_number`` into ``<report_dir>/sent/<n>-<k>.<ext>``.
+def record_sent(report_dir: Path, reply_number: int, files: list[tuple[str, bytes, str]]) -> list[str]:
+    """Write the images sent with reply ``reply_number`` into ``<report_dir>/sent/<n>-<k>.<ext>``: the bytes sent.
 
     Returns:
         Their names relative to the report's directory, in order, as the reply records them.
     """
     (report_dir / "sent").mkdir(exist_ok=True)
     names = []
-    for rank, path in enumerate(paths, 1):
-        with path.open("rb") as handle:
-            ext = extension_of(handle.read(12)) or path.suffix
-        name = f"sent/{reply_number}-{rank}{ext}"
-        shutil.copyfile(path, report_dir / name)
-        names.append(name)
+    for rank, (name, data, _) in enumerate(files, 1):
+        names.append(f"sent/{reply_number}-{rank}{Path(name).suffix}")
+        (report_dir / names[-1]).write_bytes(data)
     return names

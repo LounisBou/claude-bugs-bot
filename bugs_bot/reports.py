@@ -92,8 +92,8 @@ def send_reply(
     Raises:
         ImagesNotSent: The text went out alone: it is recorded, without images.
     """
-    sent, shown, failure = post(channel, report.get("chat_id", chat_id), text, images or [], report["message_ids"][0], mention)
-    reply = {"date": datetime.fromtimestamp(now, timezone.utc).isoformat(), "text": sent[0]["text"], "message_id": sent[0]["message_id"]}
+    posted, shown, failure = post(channel, report.get("chat_id", chat_id), text, images or [], report["message_ids"][0], mention)
+    reply = {"date": datetime.fromtimestamp(now, timezone.utc).isoformat(), **posted}
 
     def record(fresh: dict) -> int:
         fresh["replies"].append(reply)
@@ -206,12 +206,15 @@ def cmd_post(
     """
     paths = check_images(images) if images else []
     mention = mention_of(load_report(store, mention_report)[1]) if mention_report else None
-    sent, shown, failure = post(channel, chat_id, text, paths, None, mention)
-    entry = {"date": datetime.fromtimestamp(now, timezone.utc).isoformat(), "text": sent[0]["text"], "message_id": sent[0]["message_id"]}
+    posted, shown, failure = post(channel, chat_id, text, paths, None, mention)
+    entry = {"date": datetime.fromtimestamp(now, timezone.utc).isoformat(), **posted}
     state = store.load_state()
     state.setdefault("posts", []).append(entry | ({"images": len(shown)} if shown else {}))
     store.save_state(state)
     if failure:
         raise failure
-    print(f"posted message {sent[0]['message_id']}")
+    if "message_id" in posted:
+        print(f"posted message {posted['message_id']}")
+    else:
+        print(f"posted file{'s' * (len(posted['file_ids']) > 1)} {' '.join(posted['file_ids'])}")
 

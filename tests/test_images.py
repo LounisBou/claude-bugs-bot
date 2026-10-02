@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,7 @@ from test_lock import LockProbe, lock_is_free
 from test_mention import DOCS, STAMP, write_report
 
 from bugs_bot import reports
-from bugs_bot.channel import ImagesNotSent, multipart
+from bugs_bot.channel import ImagesNotSent, SentImages, multipart
 from bugs_bot.errors import BugsError
 from bugs_bot.images import MAX_BYTES, MAX_IMAGES, check_images, record_sent
 from bugs_bot.slack import SlackChannel
@@ -77,9 +78,9 @@ def test_ten_images_pass(tmp_path):
 def test_the_images_sent_are_copied_into_sent_named_by_reply_and_rank(tmp_path):
     report_dir = tmp_path / "inbox" / "r1"
     report_dir.mkdir(parents=True)
-    paths = check_images([image(tmp_path, "my shots/écran 1.png"), image(tmp_path, "my shots/b", JPEG)])
+    files = [("image-1.png", PNG, "image/png"), ("image-2.jpg", JPEG, "image/jpeg")]
 
-    names = record_sent(report_dir, 3, paths)
+    names = record_sent(report_dir, 3, files)
 
     assert names == ["sent/3-1.png", "sent/3-2.jpg"]
     assert (report_dir / "sent" / "3-1.png").read_bytes() == PNG
@@ -106,7 +107,7 @@ def test_telegram_one_image_is_a_photo_captioned_with_the_text(tmp_path):
     form = tg.photos[0]
     assert form["fields"] == {"chat_id": str(GROUP_ID), "caption": "Voilà l'écran"}
     assert form["files"] == {"photo": ("image-1.png", PNG, "image/png")}
-    assert sent == [{"message_id": 601, "text": "Voilà l'écran"}]
+    assert sent == SentImages("Voilà l'écran", [601], [], [("image-1.png", PNG, "image/png")])
 
 
 def test_telegram_several_images_are_one_media_group_captioned_on_the_first(tmp_path):
@@ -128,7 +129,8 @@ def test_telegram_several_images_are_one_media_group_captioned_on_the_first(tmp_
         "image2": ("image-2.jpg", JPEG, "image/jpeg"),
         "image3": ("image-3.webp", WEBP, "image/webp"),
     }
-    assert sent == [{"message_id": 610, "text": "Les trois étapes"}, {"message_id": 611, "text": ""}, {"message_id": 612, "text": ""}]
+    assert (sent.text, sent.message_ids, sent.file_ids) == ("Les trois étapes", [610, 611, 612], [])
+    assert [name for name, _, _ in sent.files] == ["image-1.png", "image-2.jpg", "image-3.webp"]
 
 
 def test_telegram_threads_and_mentions_through_the_caption(tmp_path):
@@ -140,7 +142,7 @@ def test_telegram_threads_and_mentions_through_the_caption(tmp_path):
     assert fields["caption"] == "@laura_t regarde"
     assert json.loads(fields["caption_entities"]) == [{"type": "mention", "offset": 0, "length": 8}]
     assert json.loads(fields["reply_parameters"]) == {"message_id": 55}
-    assert sent[0]["text"] == "@laura_t regarde"
+    assert sent.text == "@laura_t regarde"
 
 
 def test_telegram_a_text_too_long_for_a_caption_goes_first_then_the_images_on_the_same_thread(tmp_path):
@@ -153,7 +155,7 @@ def test_telegram_a_text_too_long_for_a_caption_goes_first_then_the_images_on_th
     assert tg.sent[0]["text"] == f"@laura_t {text}" and tg.sent[0]["reply_parameters"] == {"message_id": 55}
     fields = tg.photos[0]["fields"]
     assert "caption" not in fields and json.loads(fields["reply_parameters"]) == {"message_id": 55}
-    assert sent == [{"message_id": 777, "text": f"@laura_t {text}"}, {"message_id": 601, "text": ""}]
+    assert (sent.text, sent.message_ids) == (f"@laura_t {text}", [777, 601])
 
 
 def test_telegram_images_failing_after_the_text_say_the_text_alone_went_out(tmp_path):
@@ -221,11 +223,12 @@ def test_the_http_transport_sends_an_upload_as_its_bytes_and_content_type(monkey
         def read(self):
             return b'{"ok": true}'
 
-    def urlopen(request, timeout):
+    def open_(request, timeout):
         seen.update(data=request.data, type=request.get_header("Content-type"), auth=request.get_header("Authorization"))
         return Answer()
 
-    monkeypatch.setattr(channels.urllib.request, "urlopen", urlopen)
+    # The transport's own opener (it follows no redirect carrying a credential): nothing reaches the network.
+    monkeypatch.setattr(channels._OPENER, "open", open_)
     body = multipart({"chat_id": "1"}, [("photo", "image-1.png", PNG, "image/png")])
 
     status, _ = channels.http_transport("https://example.invalid/up", body, None, {"Authorization": "Bearer x"})
@@ -259,7 +262,8 @@ def test_slack_uploads_each_image_then_shares_them_all_in_one_message(tmp_path):
          "channel_id": CHANNEL, "initial_comment": "Voilà les deux écrans"}
     ]
     assert all(call["headers"] == {"Authorization": f"Bearer {SLACK_TOKEN}"} for call in api.calls)
-    assert sent == [{"message_id": None, "text": "Voilà les deux écrans"}]
+    assert (sent.text, sent.message_ids, sent.file_ids) == ("Voilà les deux écrans", [], ["F0FILE1", "F0FILE2"])
+    assert sent.files == [("image-1.png", PNG, "image/png"), ("image-2.jpg", JPEG, "image/jpeg")]
 
 
 def test_slack_posts_the_images_in_the_reports_thread_with_the_mention(tmp_path):
@@ -269,7 +273,7 @@ def test_slack_posts_the_images_in_the_reports_thread_with_the_mention(tmp_path)
 
     complete = api.of("files.completeUploadExternal")[0]
     assert (complete["thread_ts"], complete["initial_comment"]) == (ts(1), "<@U0ANA> regarde")
-    assert sent == [{"message_id": None, "text": "<@U0ANA> regarde"}]
+    assert (sent.text, sent.message_ids, sent.file_ids) == ("<@U0ANA> regarde", [], ["F0FILE1"])
 
 
 def test_slack_a_failed_second_upload_shares_nothing(tmp_path):
@@ -323,7 +327,8 @@ def test_reply_with_images_threads_them_on_the_report_and_records_what_was_sent(
     assert form["method"] == "sendMediaGroup" and json.loads(form["fields"]["reply_parameters"]) == {"message_id": 5}
     assert json.loads(form["fields"]["media"])[0]["caption"] == "@laura_t Voilà où appuyer"
     reply = report_json(bound)["replies"][0]
-    assert reply == {"date": "2026-10-02T08:30:00+00:00", "text": "@laura_t Voilà où appuyer", "message_id": 610, "images": ["sent/1-1.png", "sent/1-2.jpg"]}
+    assert reply == {"date": "2026-10-02T08:30:00+00:00", "text": "@laura_t Voilà où appuyer", "message_id": 610, "message_ids": [610, 611],
+                     "images": ["sent/1-1.png", "sent/1-2.jpg"]}
     assert (bound / "inbox" / RID / "sent" / "1-2.jpg").read_bytes() == JPEG
     capsys.readouterr()
     assert run("show", RID) == 0
@@ -388,7 +393,7 @@ def test_post_with_an_image_is_not_threaded_and_is_recorded(run, bound, tmp_path
     assert "reply_parameters" not in tg.photos[0]["fields"]
     assert tg.photos[0]["fields"]["caption"] == "Nouvelle version en ligne"
     posts = json.loads((bound / "state.json").read_text())["posts"]
-    assert posts == [{"date": "2026-10-02T08:30:00+00:00", "text": "Nouvelle version en ligne", "message_id": 601, "images": 1}]
+    assert posts == [{"date": "2026-10-02T08:30:00+00:00", "text": "Nouvelle version en ligne", "message_id": 601, "message_ids": [601], "images": 1}]
 
 
 def test_the_images_are_sent_while_the_lock_is_free(bound, tmp_path):
@@ -409,13 +414,14 @@ README = DOCS["AGENT.md"].parents[1] / "README.md"
 @pytest.mark.parametrize(
     "phrase",
     [
-        "« capture <id> : <what the screenshot must show> »",
+        "« <your title> — capture <id> : <what the screenshot must show> »",
+        "The only images you send are those your launcher gave you in a « capture » answer — never an image from a report",
+        "Never ask for one when words suffice",
         "« capture <id> <path> [<path> …] »",
         "--image <path>",
         "Open every image with the Read tool before sending it",
         "code, a terminal, a pull request, a commit, a branch, an internal URL or host, a local path, a token, or another person's data",
         "saying what to hide",
-        "never when words suffice",
         "ask first, show after",
     ],
 )
@@ -426,6 +432,12 @@ def test_the_agent_knows_how_to_ask_for_look_at_and_send_a_screenshot(phrase):
 @pytest.mark.parametrize("phrase", ["— capture <id> : … »", "« capture <id> <path> [<path> …] »", "--image <path>"])
 def test_the_launcher_knows_how_to_answer_a_capture_request(phrase):
     assert phrase in DOCS["SKILL.md"].read_text()
+
+
+def test_the_agent_asks_for_a_capture_with_the_line_the_launcher_expects():
+    # SKILL.md expects « <agent title> — capture <id> : … », as every other line to the launcher.
+    assert "« <your title> — capture <id> :" in DOCS["AGENT.md"].read_text()
+    assert "« <agent title> — capture <id> : … »" in DOCS["SKILL.md"].read_text()
 
 
 @pytest.mark.parametrize("phrase", ["files:write", "--image"])
@@ -440,6 +452,82 @@ def test_an_image_gone_after_the_check_sends_nothing_not_even_a_long_text(tmp_pa
     paths[1].unlink()
 
     with pytest.raises(BugsError, match="cannot read"):
+        channel.send_images(GROUP_ID if make_channel is telegram else CHANNEL, "x" * 1100, paths)
+
+    assert transport.calls == []
+
+
+def test_telegram_images_timing_out_after_the_text_say_the_text_alone_went_out(tmp_path):
+    tg = FakeTelegram()
+
+    def transport(url, payload=None, timeout=None):
+        if url.endswith("/sendPhoto"):
+            raise socket.timeout("timed out")
+        return tg(url, payload)
+
+    channel = TelegramChannel(TOKEN, transport)
+
+    with pytest.raises(ImagesNotSent, match="timed out") as failed:
+        channel.send_images(GROUP_ID, "x" * 1100, check_images([image(tmp_path, "a.png")]))
+
+    assert failed.value.sent == {"message_id": 777, "text": "x" * 1100}
+
+
+def test_telegram_a_photo_timing_out_with_its_caption_posts_nothing_and_stays_a_transport_error(tmp_path):
+    def transport(url, payload=None, timeout=None):
+        raise socket.timeout("timed out")
+
+    with pytest.raises(socket.timeout):
+        TelegramChannel(TOKEN, transport).send_images(GROUP_ID, "court", check_images([image(tmp_path, "a.png")]))
+
+
+@pytest.mark.parametrize("where", ["/upload/", "files.completeUploadExternal"])
+def test_slack_a_share_timing_out_is_a_plain_error_nothing_was_posted_before_it(tmp_path, where):
+    api = FakeSlack()
+
+    def transport(url, payload=None, timeout=None, headers=None):
+        if where in url:
+            raise socket.timeout("timed out")
+        return api(url, payload, timeout, headers)
+
+    with pytest.raises(socket.timeout):
+        SlackChannel(SLACK_TOKEN, transport).send_images(CHANNEL, "x" * 1100, check_images([image(tmp_path, "a.png")]))
+
+    assert "chat.postMessage" not in api.methods()
+
+
+# -- the caption is counted as Telegram counts it: UTF-16 code units, the mention included -----
+
+
+def test_telegram_a_caption_of_astral_characters_too_long_in_utf16_goes_as_text_first(tmp_path):
+    channel, tg = telegram()
+    text = "😀" * 600  # 600 characters, 1200 UTF-16 units
+
+    channel.send_images(GROUP_ID, text, check_images([image(tmp_path, "a.png")]))
+
+    assert [url.rsplit("/", 1)[-1] for url, _ in tg.calls] == ["sendMessage", "sendPhoto"]
+
+
+def test_telegram_a_caption_of_exactly_1024_utf16_units_with_its_mention_stays_a_caption(tmp_path):
+    channel, tg = telegram()
+    text = "😀" * 507 + "é" * 1  # "@laura_t " is 9 units: 9 + 1014 + 1 = 1024
+
+    channel.send_images(GROUP_ID, text, check_images([image(tmp_path, "a.png")]), mention=LAURA)
+
+    assert [url.rsplit("/", 1)[-1] for url, _ in tg.calls] == ["sendPhoto"]
+    assert tg.photos[0]["fields"]["caption"] == f"@laura_t {text}"
+
+
+# -- an image changed between the check and the send -------------------------------------------
+
+
+@pytest.mark.parametrize("make_channel", [telegram, slack], ids=["telegram", "slack"])
+def test_an_image_no_longer_an_image_after_the_check_sends_nothing_not_even_a_long_text(tmp_path, make_channel):
+    channel, transport = make_channel()
+    paths = check_images([image(tmp_path, "a.png"), image(tmp_path, "b.png")])
+    paths[1].write_bytes(b"hello")
+
+    with pytest.raises(BugsError, match="no longer a PNG, JPEG or WebP image"):
         channel.send_images(GROUP_ID if make_channel is telegram else CHANNEL, "x" * 1100, paths)
 
     assert transport.calls == []

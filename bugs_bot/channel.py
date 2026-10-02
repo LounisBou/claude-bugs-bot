@@ -113,6 +113,16 @@ def multipart(fields: Mapping[str, str], files: Sequence[tuple[str, str, bytes, 
     return Upload(b"".join(parts) + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}")
 
 
+@dataclass(frozen=True)
+class SentImages:
+    """What ``send_images`` posted."""
+
+    text: str  # the text as posted (the mention included), "" when there was none
+    message_ids: list[MessageId]  # every message posted, in order: the text's first when it went alone
+    file_ids: list[str]  # the files shared, on a platform that keeps them apart from messages (Slack); else []
+    files: list[tuple[str, bytes, str]]  # each image as read and sent: (name, bytes, content type)
+
+
 class ImagesNotSent(BugsError):
     """The text of a message with images went out on its own (too long for a caption), and the images failed after it.
 
@@ -158,11 +168,12 @@ class Channel(Protocol):
 
     def send_images(
         self, chat_id: ChatId, text: str, paths: list[Path], reply_to: MessageId | None = None, mention: Mention | None = None
-    ) -> list[dict]:
-        """Post images (checked already) with ``text``, threaded on ``reply_to``; return one ``send``-like dict per message posted.
+    ) -> SentImages:
+        """Post images (checked already) with ``text``, threaded on ``reply_to``; return what was posted.
 
         The first message carries the text as its caption when the platform allows one that long; else
-        the text is posted first, then the images, on the same thread. A message without text says ``""``.
+        the text is posted first, then the images, on the same thread. Each image is read once, before
+        anything goes out: those bytes are the ones sent, and the ones returned.
 
         Raises:
             ImagesNotSent: The text went out first and the images failed: only it was posted.
@@ -176,6 +187,10 @@ class Channel(Protocol):
 
     def delete(self, chat_id: ChatId, message_id: MessageId) -> None:
         """Delete a message the bot posted."""
+        ...
+
+    def delete_file(self, file_id: str) -> None:
+        """Delete a file the bot shared, on a platform that keeps files apart from messages (``SentImages.file_ids``)."""
         ...
 
     def react(self, chat_id: ChatId, message_id: MessageId, emoji: str) -> None:

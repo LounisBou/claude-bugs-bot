@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
-from bugs_bot.channel import Author, Batch, ChatId, Mention, MessageId, Transport, checked_root, headers_of, multipart
+from bugs_bot.channel import Author, Batch, ChatId, Mention, MessageId, SentImages, Transport, checked_root, headers_of, multipart
 from bugs_bot.envfile import read_secret
 from bugs_bot.errors import BugsError, RateLimited
 from bugs_bot.images import wire_file
@@ -180,20 +180,20 @@ class SlackChannel:
 
     def send_images(
         self, chat_id: ChatId, text: str, paths: list[Path], reply_to: MessageId | None = None, mention: Mention | None = None
-    ) -> list[dict]:
+    ) -> SentImages:
         """Post images with ``text`` as one message: each file gets an upload URL and is uploaded, then
         ``files.completeUploadExternal`` shares them all, ``text`` as their comment, in ``reply_to``'s thread.
 
         Nothing is shared until every upload went through: a failed upload posts nothing. Slack does not
-        say which message the share became, so its id is ``None`` (it cannot be edited or deleted).
+        say which message the share became: what was posted is named by its files' ids (``delete_file``).
 
         Raises:
             BugsError: Nothing was posted.
         """
         if mention:
             text = with_mention(mention, text)
-        files = []
-        for name, data, kind in [wire_file(path, rank) for rank, path in enumerate(paths, 1)]:  # read before any upload
+        files, read = [], [wire_file(path, rank) for rank, path in enumerate(paths, 1)]  # read before any upload
+        for name, data, kind in read:
             ticket = self.call("files.getUploadURLExternal", filename=name, length=len(data))
             if not self._on_slack(ticket["upload_url"]):
                 raise BugsError("upload refused: the URL is not on Slack")
@@ -205,7 +205,7 @@ class SlackChannel:
         if reply_to is not None:
             extra["thread_ts"] = str(reply_to)
         self.call("files.completeUploadExternal", post=True, files=files, channel_id=chat_id, **extra)
-        return [{"message_id": None, "text": text}]
+        return SentImages(text, [], [file["id"] for file in files], read)
 
     def edit(self, chat_id: ChatId, message_id: MessageId, text: str, mention: Mention | None = None) -> dict:
         """Rewrite a posted message."""
@@ -217,6 +217,10 @@ class SlackChannel:
     def delete(self, chat_id: ChatId, message_id: MessageId) -> None:
         """Delete a message the bot posted."""
         self.call("chat.delete", post=True, channel=chat_id, ts=str(message_id))
+
+    def delete_file(self, file_id: str) -> None:
+        """Delete a file the bot shared: the images of a share go with it."""
+        self.call("files.delete", post=True, file=file_id)
 
     def react(self, chat_id: ChatId, message_id: MessageId, emoji: str) -> None:
         """Put ``emoji`` on a message, taking the bot's other reactions off: it holds one, as on Telegram.
