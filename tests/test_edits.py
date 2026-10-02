@@ -71,17 +71,64 @@ def test_an_edit_replaces_the_report_text_keeps_the_previous_and_wait_says_it_un
     assert capsys.readouterr().out == ""
 
 
-def test_an_edit_of_a_media_group_member_goes_to_the_group_s_report(bound, run):
-    tg = FakeTelegram([message(1, 10, photo="p1", caption="la capture", media_group_id="g"), message(2, 11, photo="p2", media_group_id="g")])
+def album(*captions: str) -> FakeTelegram:
+    """Return a Telegram holding one media group, a photo per caption (``""``: a photo without one), ids from 10."""
+    return FakeTelegram(
+        [message(n + 1, 10 + n, photo=f"p{n}", media_group_id="g", **({"caption": c} if c else {})) for n, c in enumerate(captions)]
+    )
+
+
+def test_an_edit_of_a_media_group_member_corrects_that_member_only(bound, run):
+    tg = album("la capture", "le menu")
     assert run("pull", transport=tg) == 0
-    tg.updates.append(edited(3, 11, BASE_DATE + 60, photo="p2", caption="les deux captures", media_group_id="g"))
+    tg.updates.append(edited(3, 11, BASE_DATE + 60, photo="p1", caption="le menu Réglages", media_group_id="g"))
 
     assert run("pull", transport=tg) == 0
 
     (only,) = reports(bound)
     after = read(bound, only.name)
-    assert after["text"] == "les deux captures" and after["images"] == ["1.jpg", "2.jpg"]
-    assert after["edits"] == [{"date": iso(BASE_DATE + 60), "message_id": 11, "previous": "la capture", "seen": False}]
+    assert after["text"] == "la capture\nle menu Réglages" and after["images"] == ["1.jpg", "2.jpg"]
+    assert after["edits"] == [{"date": iso(BASE_DATE + 60), "message_id": 11, "previous": "le menu", "seen": False}]
+
+
+def test_a_caption_removed_from_a_media_group_member_takes_that_member_s_line_only(bound, run):
+    tg = album("la capture", "le menu")
+    assert run("pull", transport=tg) == 0
+    tg.updates.append(edited(3, 11, BASE_DATE + 60, photo="p1", media_group_id="g"))
+
+    assert run("pull", transport=tg) == 0
+
+    after = read(bound, reports(bound)[0].name)
+    assert after["text"] == "la capture"
+    assert after["edits"] == [{"date": iso(BASE_DATE + 60), "message_id": 11, "previous": "le menu", "seen": False}]
+
+
+def test_a_media_group_member_edited_to_its_own_text_records_nothing(bound, run):
+    tg = album("la capture", "le menu")
+    assert run("pull", transport=tg) == 0
+    before = read(bound, reports(bound)[0].name)
+    tg.updates.append(edited(3, 11, BASE_DATE + 60, photo="p1", caption="le menu", media_group_id="g"))
+
+    assert run("pull", transport=tg) == 0
+
+    assert read(bound, reports(bound)[0].name) == before
+
+
+def test_a_media_group_report_written_without_its_members_texts_keeps_its_text_and_records_the_edit(bound, run, capsys):
+    # Written before each member's text was recorded: which line is this member's is unknown.
+    write_report(bound, 10, message_ids=[10, 11], media_group_id="g", text="la capture\nle menu")
+    tg = FakeTelegram([edited(1, 11, BASE_DATE + 60, photo="p1", caption="le menu Réglages", media_group_id="g")])
+
+    assert run("pull", transport=tg) == 0
+
+    after = read(bound)
+    assert after["text"] == "la capture\nle menu"
+    assert after["edits"] == [
+        {"date": iso(BASE_DATE + 60), "message_id": 11, "previous": None, "text": "le menu Réglages", "seen": False}
+    ]
+    capsys.readouterr()
+    assert run("show", REPORT) == 0
+    assert "modifié : (not recorded) → le menu Réglages" in capsys.readouterr().out
 
 
 def test_an_edit_of_a_message_never_recorded_writes_nothing(bound, run):

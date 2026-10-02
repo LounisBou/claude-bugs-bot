@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from bugs_bot.answers import record_answer
 from bugs_bot.channel import Channel, ChatId, InboundMessage, MessageId
 from bugs_bot.channels import mask
-from bugs_bot.edits import record_edit
+from bugs_bot.edits import joined, record_edit
 from bugs_bot.errors import BugsError
 from bugs_bot.followup import clear_answered
 from bugs_bot.people import record_language
@@ -71,19 +71,22 @@ def build_report(channel: Channel, store: Store, group: list[InboundMessage]) ->
                 name = f"{len(images) + 1}{attachment.ext}"
                 (tmp / name).write_bytes(channel.get_file(attachment.file_id))
                 images.append(name)
-        texts = [m.text for m in group if m.text]
+        # Each member's own text: an edit of one member corrects that member's line only.
+        texts = {str(m.message_id): m.text for m in group if m.text}
+        message_ids = [m.message_id for m in group]
         write_json(
             tmp / "report.json",
             {
                 "id": report_id,
                 "chat_id": first.chat_id,
-                "message_ids": [m.message_id for m in group],
+                "message_ids": message_ids,
                 "media_group_id": first.group_key,  # the stored key keeps its first name
                 "date": datetime.fromtimestamp(first.date, timezone.utc).isoformat(),
                 "author": first.author.name,
                 "author_id": first.author.id,
                 "author_username": first.author.username,
-                "text": "\n".join(texts),
+                "text": joined(message_ids, texts),
+                "texts": texts,
                 "images": images,
                 "status": "seen",
                 "reaction": {"wanted": EMOJI_SEEN, "applied": None, "error": None},
