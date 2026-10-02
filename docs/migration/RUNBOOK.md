@@ -38,6 +38,7 @@ python3 - "$R" <<'PY'
 import json, sys
 r = sys.argv[1]
 print("offset ", json.load(open(f"{r}/legacy/state.json")).get("offset"), json.load(open(f"{r}/home/state.json"))["offset"])
+print("registry", "telegram:" + str(json.load(open(f"{r}/legacy/state.json"))["chat_id"]), *json.load(open(f"{r}/home/projects.json")))
 PY
 ls "$R/legacy/inbox" | wc -l; ls "$R/home/torrentmate/inbox" | wc -l       # reports
 ls "$R/legacy/people" | wc -l; ls "$R/home/torrentmate/people" | wc -l     # people cards
