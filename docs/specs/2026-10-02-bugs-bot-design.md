@@ -172,6 +172,9 @@ défaut) ».
   agent with `follow-up <report-id>`; the agent sends ONE reminder, threaded and mentioning the
   person, in « The voice » (light, warm, never a reproach, never the first message repeated), posted
   with `--follow-up`, which records it so the same wait is reminded once.
+- ONE reminder only (operator, 2026-10-02: « ok va pour une seule »): still unanswered `follow_up_hours`
+  after the reminder, `wait` prints `unanswered <report-id>` and the agent tells its launcher in one
+  line (« <Agent title> — sans réponse <id> : <what was asked> »), once; it never reminds again.
 - `bugs-bot overdue` lists the follow-ups due (also part of the restart's `pending` listing).
 
 ## 4. The CLI and the fixed launcher

@@ -475,7 +475,10 @@ bugs-bot wait                                                       # now also p
 asks the person something are posted with `--awaits`; a greeting, a thank-you, « de rien » never.
 On `follow-up <id>`: `person <id>`, `show <id>`, then ONE reminder `reply <id> "<text>" --mention
 --follow-up`, in « The voice » (light, warm, never a reproach, never the first message repeated).
-`pending` shows due follow-ups at restart.
+ONE reminder only (operator, « ok va pour une seule »): still unanswered `follow_up_hours` after it,
+`wait` prints `unanswered <id>` (once: `awaiting["escalated"]` recorded by `bugs-bot escalated <id>`)
+and the agent tells its launcher in one line; it never reminds again. `pending` shows due follow-ups
+and unanswered ones at restart.
 
 `/bugs-bot:start` (`commands/start.md`): refuses without `.bugs-bot.json` (points to
 `/bugs-bot:init`); `ListAgents` — a live row named `agent_title` → refuse (« you already have
@@ -496,7 +499,7 @@ archive name and `state.json` entry; `gate --measure` with a stub gauge script p
 `gate --set` writes the project file; small window rule (80 %) carried over; `deployed` three
 outcomes; follow-ups: `--awaits` records, a later message of the same person clears (and of
 another person does not), `due` at `follow_up_hours` − 1 s / + 1 s, one reminder only (`--follow-up` twice
-refused), `wait` wakes on a due follow-up, `follow_up_hours` from the project file (non-default
+refused), `wait` wakes on a due follow-up, `unanswered` once after a further `follow_up_hours` and never again, `follow_up_hours` from the project file (non-default
 value); guard test.
 
 **Definition of done:** draft PR stacked on p3; suite green including the guard; `grep -n
