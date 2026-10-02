@@ -9,6 +9,7 @@ from pathlib import Path
 from bugs_bot.channel import Channel, ChatId, Mention
 from bugs_bot.errors import BugsError
 from bugs_bot.followup import mark_awaiting, mark_reminded, require_due
+from bugs_bot.questions import asked, awaited_elsewhere, drop_closed, queue_question
 from bugs_bot.reactions import move_to, say_reaction_pending
 from bugs_bot.store import CLOSED_STATUSES, EMOJI_FIXED, EMOJI_TAKEN, OPEN_STATUSES, Store, load_report, write_json
 
@@ -93,15 +94,24 @@ def cmd_reply(
 ) -> None:
     """Answer in the group, threaded on the report's first message; ``tag`` mentions its author.
 
-    ``awaits`` records that the reply waits for the person's answer; ``follow_up_hours`` makes it the
-    one reminder of a wait that old (refused before anything is sent when none is due).
+    ``awaits`` records that the reply waits for the person's answer — unless their answer is already
+    awaited on another open report: one question at a time (spec § 3.5), so nothing is posted and
+    the question is queued on their card, for ``wait`` to hand back (``ask <id>``) once they answer.
+    ``follow_up_hours`` makes it the one reminder of a wait that old (refused before anything is
+    sent when none is due).
     """
     path, report = load_report(store, report_id)
     if follow_up_hours is not None:
         require_due(report, follow_up_hours, now)
+    other = awaited_elsewhere(store, report) if awaits else None
+    if other:
+        queue_question(store, report, text, now)
+        print(f"queued {report_id}: {report['author']} already awaits {other}")
+        return
     send_reply(channel, chat_id, path, report, text, now, mention_of(report) if tag else None)
     if awaits:
         mark_awaiting(path, report, len(report["replies"]), now)
+        asked(store, report)
     if follow_up_hours is not None:
         mark_reminded(path, report, now)
     print(f"replied to {report_id}")
@@ -222,6 +232,7 @@ def cmd_fixed(channel: Channel, store: Store, chat_id: int, report_id: str, note
     if note:
         report["fix_ref"] = note
         write_json(path / "report.json", report)
+    drop_closed(store, report)
     print(f"fixed {report_id}")
     return say_reaction_pending(channel, failure)
 
@@ -236,6 +247,7 @@ def cmd_done(
         send_reply(channel, chat_id, path, report, reason, now)
     report["status"] = "done"
     write_json(path / "report.json", report)
+    drop_closed(store, report)
     print(f"done {report_id}")
 
 

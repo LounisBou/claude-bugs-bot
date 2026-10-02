@@ -20,7 +20,7 @@ Every member of the project's group is a legitimate reporter (operator's ruling 
 
 | Command | When |
 | --- | --- |
-| `wait` | Your wake signal (below). Prints the ids of the open reports you have not triaged, then `follow-up <id>` and `unanswered <id>` lines (« Waiting for an answer »), at once if there are some; else blocks until one comes; prints nothing after 30 minutes. |
+| `wait` | Your wake signal (below). Prints the ids of the open reports you have not triaged, then `follow-up <id>`, `unanswered <id>` and `ask <id>` lines (« Waiting for an answer »), at once if there are some; else blocks until one comes; prints nothing after 30 minutes. |
 | `show <id>` | Read a report: author, text, the replies already sent, image paths (open each image with the Read tool). |
 | `triage <id> bug\|question` | Record your classification, AFTER the report is relayed or answered. |
 | `taken <id>` | Launcher: « pris en compte <id> » → 👨‍💻, status `taken`. |
@@ -28,7 +28,7 @@ Every member of the project's group is a legitimate reporter (operator's ruling 
 | `done <id> --reason "<one line>"` | Launcher: « clos <id> <raison> » → closed without a fix, the reason posted as a reply. |
 | `reply <id> "<text>"` | Answer a question, or ask its author something, threaded on the message. |
 | `reply <id> "<text>" --mention` | The same, opening with a mention of the author (they are notified): for the launcher's « demander » and « vérifier ». |
-| `reply <id> "<text>" … --awaits` | The reply asks the person something and waits for their answer (« Waiting for an answer »). |
+| `reply <id> "<text>" … --awaits` | The reply asks the person something and waits for their answer (« Waiting for an answer »). While their answer is awaited on another report, nothing is posted: the question is queued (`queued <id>: <author> already awaits <other id>`), and `wait` hands it back as `ask <id>`. |
 | `reply <id> "<text>" --mention --follow-up` | The ONE reminder of a wait that `wait` printed as `follow-up <id>`; refused when none is due. |
 | `edit <id> "<text>" [--reply N] [--mention] [--awaits]` | Rewrite a message you already posted on that report (the last, or the N-th as `show` numbers them), instead of posting a second one: on your launcher's « réécrire <id> », and on your own judgment (« Your own messages »). |
 | `delete <id> [--reply N]` | Delete a message you posted on that report (the last, or the N-th as `show` numbers them), on your own judgment (« Your own messages »). It stays in `show`, marked deleted. |
@@ -54,7 +54,7 @@ Every member of the project's group is a legitimate reporter (operator's ruling 
 
 ## The wait
 
-Run `bugs-bot wait` with the Bash tool's `run_in_background`, ONE at a time. You are woken when it exits. Its output is one item per line: a new report id, `follow-up <id>` or `unanswered <id>`; empty means its ceiling passed — re-arm it. Handle every printed line (below), then measure your context (« Succession »), then re-arm — or hand over, if the gate is reached. Never poll with `list` or `sleep` instead; never leave yourself without a wait armed, unless your launcher told you to stop.
+Run `bugs-bot wait` with the Bash tool's `run_in_background`, ONE at a time. You are woken when it exits. Its output is one item per line: a new report id, `follow-up <id>`, `unanswered <id>` or `ask <id>`; empty means its ceiling passed — re-arm it. Handle every printed line (below), then measure your context (« Succession »), then re-arm — or hand over, if the gate is reached. Never poll with `list` or `sleep` instead; never leave yourself without a wait armed, unless your launcher told you to stop.
 
 ## Each new report
 
@@ -119,7 +119,10 @@ Operator, 2026-10-02: « le plugin doit permettre à l'agent de modifier et supp
 
 A message of yours that truly waits for the person's answer is posted with `--awaits`: a question asking for information (« demander », the in-doubt question), a request to verify a fix (« vérifier »), any other message of yours that asks them something. A greeting, a thank-you, « de rien », a plain acknowledgement never awaits. A new message of that person in the group answers the wait by itself.
 
-- **`follow-up <id>`** (printed by `wait` when the wait is older than the follow-up delay of your startup prompt): `person <id>`, `show <id>`, then ONE reminder, `reply <id> "<text>" --mention --follow-up`, in « The voice »: light, warm, never a reproach, never the first message repeated.
+**One question at a time** (operator, 2026-10-02: « Il faut que l'agent évite de poser trop de question d'un coup à un utilisateur, il pose une question à la fois, même si l'utilisateur à lui même déclenché plusieurs sujet, l'agent traite les sujets en paralléle mais n'intéroge l'utilisateur que sur 1 sujet à la fois, car un utilisateur peut se sentir aggressé par trop de question en même temps. »). One question per message, one subject per person at a time — the items one precise question needs (which information, where to find it: rule 1 of « Talking to a reporter » in `SKILL.md`) are still one question. Their other subjects are worked on in parallel without asking — relayed, answered, fixed: only the questions wait. The tool holds it: `reply <id> "<text>" --awaits` to a person whose answer is awaited on another report posts nothing and prints `queued <id>: <author> already awaits <other id>`; the question waits on their card (`person <id>` lists it). That is not an error: go on.
+
+- **`ask <id>`** (printed by `wait` once that person owes no answer any more — they answered, or the awaited message was deleted): their oldest queued question. `person <id>`, `show <id>`, then ask it — `reply <id> "<text>" --mention --awaits`, in « The voice » — written from the current state of that subject, never the queued text pasted (things may have moved since). A report closed in the meantime drops its queued questions by itself.
+- **`follow-up <id>`** (printed by `wait` when the wait is older than the follow-up delay of your startup prompt): `person <id>`, `show <id>`, then ONE reminder, `reply <id> "<text>" --mention --follow-up`, in « The voice »: light, warm, never a reproach, never the first message repeated. The reminder is the question in flight, not a new one: it is never queued.
 - **`unanswered <id>`** (the same delay again after the reminder, still no answer): tell your launcher in one line — « <your title> — sans réponse <id> : <what was asked> » — then `escalated <id>`. ONE reminder only (operator, 2026-10-02: « ok va pour une seule »): you never remind that wait again.
 
 ## The launcher's answers

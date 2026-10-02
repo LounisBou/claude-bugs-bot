@@ -105,6 +105,8 @@ def cmd_person(store: Store, ref: str) -> None:
         raise BugsError(f"no such person: {ref}")
     print(f"person: {(card or {}).get('name') or name}  key: {key}")
     print(f"language: {(card or {}).get('language') or 'unknown'}")
+    for question in (card or {}).get("questions", []):
+        print(f"question queued {question['queued'][:16]} for {question['report']}: {question['text']}")
     if not card or not card["notes"]:
         print("no notes yet")
         return

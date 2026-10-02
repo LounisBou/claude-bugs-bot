@@ -1,0 +1,194 @@
+"""One question at a time per person: a second question while they owe an answer is queued, asked once they answer."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from samples import BASE_DATE, FakeTelegram
+from test_followup import person_message
+from test_mention import DOCS, STAMP, write_report
+
+HOUR = 3600
+FIRST, SECOND, MATHIS = f"{STAMP}-5", f"{STAMP}-6", f"{STAMP}-9"
+
+
+@pytest.fixture
+def laura(bound) -> Path:
+    """Two open reports of Laura (id 7), one of Mathis (id 8)."""
+    write_report(bound, 5, author="Laura", author_id=7, text="la liste saute")
+    write_report(bound, 6, author="Laura", author_id=7, text="le bouton Lecture ne répond pas")
+    write_report(bound, 9, author="Mathis", author_id=8, text="écran noir")
+    return bound
+
+
+def card(home: Path, key: str = "7") -> dict:
+    return json.loads((home / "people" / f"{key}.json").read_text())
+
+
+def report(home: Path, report_id: str) -> dict:
+    return json.loads((home / "inbox" / report_id / "report.json").read_text())
+
+
+def wait_lines(run, capsys, now: float = BASE_DATE + 120) -> list[str]:
+    capsys.readouterr()
+    assert run("wait", "--timeout", "0", now=now) == 0
+    return capsys.readouterr().out.splitlines()
+
+
+def laura_answers(run, at: float = BASE_DATE + 60) -> None:
+    """Laura writes in the group: Pull lifts what she was asked before."""
+    tg = FakeTelegram([person_message(10, 100, user_id=7, name="Laura", date=int(at), text="iPhone SE")])
+    assert run("pull", transport=tg, now=at + 1) == 0
+
+
+@pytest.fixture
+def queued(run, laura, capsys) -> FakeTelegram:
+    """Laura asked about FIRST, then a second question about SECOND queued; returns the second call's transport."""
+    assert run("reply", FIRST, "Tu es sur quel iPhone ?", "--awaits", now=BASE_DATE) == 0
+    tg = FakeTelegram()
+    assert run("reply", SECOND, "Il répond au deuxième appui ?", "--awaits", transport=tg, now=BASE_DATE + 10) == 0
+    return tg
+
+
+# -- a second question is queued, not posted ---------------------------------------------------
+
+
+def test_a_second_question_to_the_same_person_is_queued_not_posted(queued, laura, capsys):
+    assert queued.sent == []
+    assert capsys.readouterr().out.strip().splitlines()[-1] == f"queued {SECOND}: Laura already awaits {FIRST}"
+    assert card(laura)["questions"] == [
+        {"report": SECOND, "text": "Il répond au deuxième appui ?", "queued": "2026-10-02T08:30:10+00:00"}
+    ]
+    assert "awaiting" not in report(laura, SECOND) and report(laura, SECOND)["replies"] == []
+
+
+def test_a_reply_that_asks_nothing_is_still_posted(queued, run, laura):
+    tg = FakeTelegram()
+
+    assert run("reply", SECOND, "Merci pour la capture !", transport=tg, now=BASE_DATE + 20) == 0
+
+    assert len(tg.sent) == 1
+
+
+def test_a_new_question_on_the_report_already_awaited_is_posted(run, laura):
+    run("reply", FIRST, "Tu es sur quel iPhone ?", "--awaits", now=BASE_DATE)
+    tg = FakeTelegram()
+
+    assert run("reply", FIRST, "Et quelle version d'iOS ?", "--awaits", transport=tg, now=BASE_DATE + 10) == 0
+
+    assert len(tg.sent) == 1 and report(laura, FIRST)["awaiting"]["reply"] == 2
+
+
+def test_two_people_never_block_each_other(run, laura):
+    run("reply", FIRST, "Tu es sur quel iPhone ?", "--awaits", now=BASE_DATE)
+    tg = FakeTelegram()
+
+    assert run("reply", MATHIS, "Tu es sur quel navigateur ?", "--awaits", transport=tg, now=BASE_DATE + 10) == 0
+
+    assert len(tg.sent) == 1 and "awaiting" in report(laura, MATHIS)
+
+
+def test_a_wait_on_a_closed_report_blocks_nothing(run, laura):
+    run("reply", FIRST, "Tu peux vérifier ?", "--awaits", now=BASE_DATE)
+    run("fixed", FIRST, now=BASE_DATE + 5)
+    tg = FakeTelegram()
+
+    assert run("reply", SECOND, "Il répond au deuxième appui ?", "--awaits", transport=tg, now=BASE_DATE + 10) == 0
+
+    assert len(tg.sent) == 1
+
+
+# -- their answer surfaces the next question ----------------------------------------------------
+
+
+def test_wait_says_nothing_of_the_queue_while_the_person_owes_an_answer(queued, run, capsys):
+    assert f"ask {SECOND}" not in wait_lines(run, capsys)
+
+
+def test_their_answer_makes_wait_print_ask(queued, run, capsys):
+    laura_answers(run)
+
+    assert f"ask {SECOND}" in wait_lines(run, capsys)
+
+
+def test_posting_the_queued_question_takes_it_off_the_queue(queued, run, laura, capsys):
+    laura_answers(run)
+    tg = FakeTelegram()
+
+    assert run("reply", SECOND, "Et le bouton Lecture, il répond au deuxième appui ?", "--awaits", transport=tg, now=BASE_DATE + 90) == 0
+
+    assert len(tg.sent) == 1 and card(laura)["questions"] == []
+    assert f"ask {SECOND}" not in wait_lines(run, capsys)
+
+
+def test_questions_surface_one_at_a_time_oldest_first(queued, run, laura, capsys):
+    write_report(laura, 7, author="Laura", author_id=7, text="un troisième sujet")
+    third = f"{STAMP}-7"
+    run("reply", third, "Ça arrive aussi en Wi-Fi ?", "--awaits", now=BASE_DATE + 20)
+    laura_answers(run)
+
+    lines = wait_lines(run, capsys)
+
+    assert f"ask {SECOND}" in lines and f"ask {third}" not in lines
+
+
+def test_deleting_the_awaited_question_surfaces_the_next(queued, run, capsys):
+    run("delete", FIRST, now=BASE_DATE + 30)
+
+    assert f"ask {SECOND}" in wait_lines(run, capsys)
+
+
+def test_a_reminder_is_the_question_in_flight_not_a_new_one(queued, run, laura):
+    tg = FakeTelegram()
+
+    assert run("reply", FIRST, "Petite relance : quel iPhone ?", "--follow-up", transport=tg, now=BASE_DATE + 25 * HOUR) == 0
+
+    assert len(tg.sent) == 1 and len(card(laura)["questions"]) == 1
+
+
+# -- a subject closed meanwhile ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("close", [("done", SECOND), ("fixed", SECOND)])
+def test_a_queued_question_on_a_report_closed_meanwhile_is_dropped(queued, run, laura, capsys, close):
+    run(*close, now=BASE_DATE + 30)
+    laura_answers(run)
+
+    assert card(laura)["questions"] == []
+    assert not any(line.startswith("ask ") for line in wait_lines(run, capsys))
+
+
+def test_a_queued_question_on_a_report_gone_from_disk_is_not_asked(queued, run, laura, capsys):
+    import shutil
+
+    shutil.rmtree(laura / "inbox" / SECOND)
+    laura_answers(run)
+
+    assert not any(line.startswith("ask ") for line in wait_lines(run, capsys))
+
+
+# -- the agent sees the queue, and keeps to one question ----------------------------------------
+
+
+def test_person_shows_the_queued_questions(queued, run, capsys):
+    capsys.readouterr()
+    run("person", FIRST)
+
+    out = capsys.readouterr().out
+    assert f"question queued 2026-10-02T08:30 for {SECOND}: Il répond au deuxième appui ?" in out.splitlines()
+
+
+@pytest.mark.parametrize("phrase", [
+    "One question per message, one subject per person at a time",
+    "`ask <id>`",
+    "queued <id>: <author> already awaits <other id>",
+    "Their other subjects are worked on in parallel without asking",
+])
+def test_the_agent_asks_one_question_at_a_time(phrase):
+    assert phrase in DOCS["AGENT.md"].read_text()
+
+
+def test_the_skill_states_one_question_at_a_time():
+    assert "One question at a time" in DOCS["SKILL.md"].read_text()
