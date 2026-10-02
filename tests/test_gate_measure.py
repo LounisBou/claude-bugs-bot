@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -134,3 +135,25 @@ def test_locate_gauge_takes_the_newest_installed_version(tmp_path):
 def test_locate_gauge_without_the_orchestrator_plugin_says_so(tmp_path):
     with pytest.raises(BugsError, match="orchestrator"):
         locate_gauge({"BUGS_BOT_CLAUDE_DIR": str(tmp_path / "claude")})
+
+
+def test_the_gauge_runs_in_the_callers_environment(run, bound, env, gauge, capsys):
+    # The real gauge reads the session id from its environment: whatever the caller has must reach it.
+    env["GAUGE_PROBE"] = "123456"
+    gauge("echo context_tokens=$GAUGE_PROBE\necho context_window=1000000")
+
+    assert run("gate", "--measure") == 0
+
+    assert "context_tokens=123456" in capsys.readouterr().out.split()
+
+
+def test_a_gauge_that_hangs_fails_the_command_with_one_line(run, bound, env, gauge, monkeypatch, capsys):
+    monkeypatch.setattr("bugs_bot.gate.GAUGE_TIMEOUT", 1)
+    env["PATH"] = os.environ["PATH"]
+    gauge("exec sleep 5")
+
+    assert run("gate", "--measure") == 1
+
+    captured = capsys.readouterr()
+    assert "the context gauge did not run" in captured.err
+    assert "handover=" not in captured.out
