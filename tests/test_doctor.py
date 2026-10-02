@@ -185,6 +185,84 @@ def test_doctor_never_writes_a_settings_file(machine_env, tmp_path):
     assert sorted(p.name for p in claude.iterdir()) == ["plugins", "settings.json", "settings.local.json"]
 
 
+def snapshot(claude: Path) -> dict:
+    """Listing, mtime and content of everything under ``claude``'s settings files."""
+    return {
+        "listing": sorted(p.name for p in claude.iterdir()),
+        "files": {p.name: (p.stat().st_mtime_ns, p.read_text()) for p in claude.glob("settings*.json")},
+    }
+
+
+def pin_mtimes(claude: Path) -> None:
+    for path in claude.glob("settings*.json"):
+        os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        {},
+        {"settings.json": json.dumps({"permissions": {"allow": ["Bash(ls:*)"]}}), "settings.local.json": "{}"},
+        {"settings.json": "{nope"},
+        {"settings.json": "{nope", "settings.local.json": json.dumps({"permissions": {"allow": []}})},
+    ],
+    ids=["no-file", "rule-missing-from-both", "one-unreadable", "unreadable-and-missing"],
+)
+@pytest.mark.parametrize("argv", [["doctor"], ["doctor", "--install-launcher"]], ids=["check", "install"])
+def test_doctor_never_writes_a_settings_file_when_the_rule_is_missing(machine_env, ps, tmp_path, files, argv):
+    claude = tmp_path / "claude"
+    (claude / "settings.json").unlink()
+    for name, content in files.items():
+        (claude / name).write_text(content)
+    pin_mtimes(claude)
+    before = snapshot(claude)
+
+    code = cli.main(argv, env=machine_env)
+
+    assert code == 1  # the rule is missing: the operator adds it
+    assert snapshot(claude) == before
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        f"TELEGRAM_BOT_TOKEN={TOKEN}\n".encode() + b"\xff\xfe\n",  # not text
+        f"TELEGRAM_BOT_TOKEN {TOKEN}\n".encode(),  # no `=`
+        f"TELEGRAM_BOT_TOKEN_OLD={TOKEN}\n".encode(),  # another variable
+    ],
+    ids=["binary", "no-equal", "other-variable"],
+)
+@pytest.mark.parametrize("argv", [["doctor"], ["doctor", "--install-launcher"]], ids=["check", "install"])
+def test_doctor_never_prints_the_token_of_a_broken_env_file(machine_env, ps, tmp_path, capsys, content, argv):
+    broken = tmp_path / "broken.env"
+    broken.write_bytes(content)
+    machine_env["BUGS_BOT_ENV_FILE"] = str(broken)
+
+    try:
+        code = cli.main(argv, env=machine_env)
+    except Exception as exc:  # noqa: BLE001 - whatever it raises must not carry the token either
+        assert TOKEN not in str(exc)
+        code = None
+
+    captured = capsys.readouterr()
+    assert TOKEN not in captured.out + captured.err
+    assert code == 1, "doctor must say the token check failed, not crash"
+
+
+def test_doctor_never_prints_the_token_when_the_env_file_is_unreadable(machine_env, ps, tmp_path, capsys):
+    locked = tmp_path / "locked.env"
+    locked.write_text(f"TELEGRAM_BOT_TOKEN={TOKEN}\n")
+    locked.chmod(0o000)
+    machine_env["BUGS_BOT_ENV_FILE"] = str(locked)
+    try:
+        code = cli.main(["doctor"], env=machine_env)
+    finally:
+        locked.chmod(0o600)
+
+    captured = capsys.readouterr()
+    assert code == 1 and TOKEN not in captured.out + captured.err
+
+
 # -- through the CLI ------------------------------------------------------------
 
 
