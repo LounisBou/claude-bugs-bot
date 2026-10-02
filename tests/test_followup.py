@@ -256,3 +256,22 @@ def test_pending_shows_due_follow_ups_and_unanswered_ones(at, asked, bound, caps
     out = capsys.readouterr().out
     assert f"follow-up {FIRST}" in out
     assert f"unanswered {second}" in out
+
+
+# -- the rules are written down ----------------------------------------------------------------
+
+AGENT_MD = Path(__file__).resolve().parent.parent / "agent" / "AGENT.md"
+SKILL_MD = Path(__file__).resolve().parent.parent / "skills" / "bugs-bot" / "SKILL.md"
+
+
+@pytest.mark.parametrize("phrase", [
+    "--awaits", "--follow-up", "follow-up <id>", "unanswered <id>", "escalated <id>", "sans réponse <id>",
+    "« de rien »", "ok va pour une seule", "never a reproach", "never the first message repeated",
+])
+def test_the_agent_knows_the_follow_up_rules(phrase):
+    assert phrase in AGENT_MD.read_text()
+
+
+@pytest.mark.parametrize("phrase", ["--awaits", "--follow-up", "follow_up_hours", "sans réponse <id>", "ok va pour une seule"])
+def test_the_skill_states_the_follow_up_rules(phrase):
+    assert phrase in SKILL_MD.read_text()

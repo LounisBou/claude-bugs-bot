@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+import pytest
 from samples import BASE_DATE
 
 from bugs_bot.handover import read_note, write_note
@@ -87,3 +89,14 @@ def test_read_without_a_note_returns_none_and_writes_nothing(bound):
     assert read_note(Store(bound), BASE_DATE) is None
 
     assert not (bound / "state.json").exists()
+
+
+AGENT_MD = Path(__file__).resolve().parent.parent / "agent" / "AGENT.md"
+
+
+@pytest.mark.parametrize("phrase", [
+    "handover write", "handover read", "## Memory and continuity", "after every exchange", "I'm new here",
+    "never introduce yourself again", "20–40 lines",
+])
+def test_the_agent_knows_its_memory_and_its_note(phrase):
+    assert phrase in AGENT_MD.read_text()
