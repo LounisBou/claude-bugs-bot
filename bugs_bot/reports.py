@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from bugs_bot.answers import show_answers
+from bugs_bot.edits import show_edits
 from bugs_bot.channel import Channel, ChatId, Mention
 from bugs_bot.errors import BugsError
 from bugs_bot.followup import mark_awaiting, mark_reminded, require_due
@@ -55,6 +56,8 @@ def cmd_show(store: Store, report_id: str) -> None:
         for name in reply.get("images", []):
             print(f"  {(path / name).resolve()}")
     for line in show_answers(store, report_id, path, report):
+        print(line)
+    for line in show_edits(store, report_id, report):
         print(line)
 
 
