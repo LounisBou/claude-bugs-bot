@@ -2,7 +2,7 @@
 
 Date: 2026-10-02. Checked against the sections of `docs/specs/2026-10-02-bugs-bot-design.md` its
 header « Amended 2026-10-02 » names — D4, criterion 6, § 3.1, § 3.2 (locked updates and edited
-messages), § 3.5, § 3.7, § 3.8 — on the head `05981b8` (this document is the only change after it).
+messages), § 3.5, § 3.7, § 3.8 — on the head `edddd59` (this document is the only change after it).
 Each claim names the file that meets it and the test that shows it, or the gap. What the review
 verdicts of the amended work dropped is not reopened. The first conformity document,
 `2026-10-02-conformity.md`, stays the record for the sections the amendment did not touch.
@@ -171,6 +171,19 @@ readme and changelog say what the build does`. That commit:
 
 Text only, with no test: these are descriptions, not rules the agent or the operator acts on.
 
+Fixed after the review of the amended work, in the same family: `edddd59` `fix(docs): say the edit
+row and the reply notification per channel`. Two statements of `skills/bugs-bot/SKILL.md` read as
+if every channel were Telegram:
+
+- The `edit` row (line 32) said an edit goes « through `editMessageText` ». It now says « through
+  the platform (Telegram's `editMessageText`, Slack's `chat.update`) », and « message is not
+  modified » is said as Telegram's (`replies.py`, `telegram.py`). Slack's edit is `chat.update`
+  (`slack.py`). `tests/test_commands.py::test_the_skill_names_both_tokens_and_sets_up_both_channels`
+  now pins `chat.update`; it failed before the change and passes after.
+- The advice of rule 6 (line 86) said « Telegram notifies the author of the message replied to »
+  without its channel. It now says that on Telegram the author is notified, and claims nothing about
+  Slack. No test pins this one.
+
 ## Scope items, for the operator (not built)
 
 The first document's S1 (normalised inbound behind the channel), S2 (`fixed --note` in French) and
@@ -185,17 +198,17 @@ above.
   messages, or adopting the Events API, which § 9 puts out of scope. It comes with the live Slack
   test.
 
-## The gate, on `05981b8`
+## The gate, on `edddd59`
 
 ```
 $ python3 -V
 Python 3.12.4
 $ python3 -m pytest -q
-1022 passed in 13.37s
+1022 passed in 13.43s
 $ ~/.pyenv/versions/3.10.9/bin/python3 -V
 Python 3.10.9
 $ ~/.pyenv/versions/3.10.9/bin/python3 -m pytest -q
-1022 passed in 14.18s
+1022 passed in 14.97s
 $ sh tests/e2e.sh
 …
 answer on 20261002-214109-1790977269-443784 in gamma
