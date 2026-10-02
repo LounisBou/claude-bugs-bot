@@ -1,4 +1,4 @@
-"""tm-bugs: read the operator's bug reports from the Telegram group « TM Bugs ».
+"""bugs-bot: read the operator's bug reports from the Telegram group « TM Bugs ».
 
 Commands: ``pull [--every S]``, ``list``, ``show <id>``, ``reply <id> "<text>"``,
 ``taken <id>``, ``fixed <id>``, ``done <id>``, ``bind``; and for the TM Bugs agent session:
@@ -49,7 +49,7 @@ def _int_arg(text: str) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     """Return the command-line parser."""
-    parser = argparse.ArgumentParser(prog="tm_bugs.py", description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(prog="bugs-bot", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     pull = sub.add_parser("pull", help="collect new messages into reports")
     mode = pull.add_mutually_exclusive_group()
@@ -189,12 +189,12 @@ def main(
                 return cmd_bind(channel, store)
         return 0
     except BugsError as exc:
-        print(f"tm-bugs: {mask(str(exc), token)}", file=sys.stderr)
+        print(f"bugs-bot: {mask(str(exc), token)}", file=sys.stderr)
     except KeyboardInterrupt:
         # PM2 stops a run with SIGINT: one line, not a traceback. Writes are atomic.
-        print("tm-bugs: interrupted", file=sys.stderr)
+        print("bugs-bot: interrupted", file=sys.stderr)
         return 130
     except Exception as exc:  # noqa: BLE001 - last resort, but the token must never leak
-        print(f"tm-bugs: {type(exc).__name__}: {mask(str(exc), token)}", file=sys.stderr)
+        print(f"bugs-bot: {type(exc).__name__}: {mask(str(exc), token)}", file=sys.stderr)
     return 1
 

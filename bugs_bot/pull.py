@@ -103,7 +103,7 @@ def cmd_pull(channel: Channel, store: Store, now: float, poll_timeout: int = 0, 
     """
     state = store.load_state()
     if "chat_id" not in state:
-        print("tm-bugs: unbound — run `tm_bugs.py bind` after posting in the group")
+        print("bugs-bot: unbound — run `tm_bugs.py bind` after posting in the group")
         return
     updates = channel.get_updates(state.get("offset"), poll_timeout, ["message"])
     for update in updates:
@@ -111,7 +111,7 @@ def cmd_pull(channel: Channel, store: Store, now: float, poll_timeout: int = 0, 
         # A group promoted to supergroup gets a new chat id: follow it.
         if msg.get("chat", {}).get("id") == state["chat_id"] and msg.get("migrate_to_chat_id"):
             state["chat_id"] = msg["migrate_to_chat_id"]
-            print(f"tm-bugs: group migrated, rebound to chat {state['chat_id']}")
+            print(f"bugs-bot: group migrated, rebound to chat {state['chat_id']}")
     kept = [
         u["message"]
         for u in updates
@@ -127,7 +127,7 @@ def cmd_pull(channel: Channel, store: Store, now: float, poll_timeout: int = 0, 
         state["offset"] = max(u["update_id"] for u in updates) + 1
         store.save_state(state)
     if not created and not poll_timeout:
-        print("tm-bugs: no new report")  # a scheduled run leaves a trace in the PM2 log; a held one would flood it
+        print("bugs-bot: no new report")  # a scheduled run leaves a trace in the PM2 log; a held one would flood it
     for report_id, group in created:
         images = sum(len(attachments(m)) for m in group)
         print(f"new {report_id} ({images} image{'s' * (images != 1)})")
@@ -210,11 +210,11 @@ def pull_loop(
                 token = read_token(env) if "chat_id" in store.load_state() else None
                 cmd_pull(TelegramChannel(token, transport) if token else None, store, wall())  # type: ignore[arg-type]
             except Exception as exc:  # noqa: BLE001 - one bad round must not end the loop
-                print(f"tm-bugs: {type(exc).__name__}: {mask(str(exc), token)}", file=sys.stderr)
+                print(f"bugs-bot: {type(exc).__name__}: {mask(str(exc), token)}", file=sys.stderr)
             sys.stdout.flush()
             sleep(every)
     except KeyboardInterrupt:
-        print("tm-bugs: stopped")
+        print("bugs-bot: stopped")
         return 0
     finally:
         signal.signal(signal.SIGTERM, previous)
@@ -263,13 +263,13 @@ def watch_loop(
                     last_purge = at
                 backoff = 0.0
             except Exception as exc:  # noqa: BLE001 - one bad round must not end the loop
-                print(f"tm-bugs: {type(exc).__name__}: {mask(str(exc), token)}", file=sys.stderr)
+                print(f"bugs-bot: {type(exc).__name__}: {mask(str(exc), token)}", file=sys.stderr)
                 backoff = min(backoff * 2, BACKOFF_CEILING) if backoff else BACKOFF_FIRST
                 sys.stdout.flush()
                 sleep(backoff)
             sys.stdout.flush()
     except KeyboardInterrupt:
-        print("tm-bugs: stopped")
+        print("bugs-bot: stopped")
         return 0
     finally:
         signal.signal(signal.SIGTERM, previous)

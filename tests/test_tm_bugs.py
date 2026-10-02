@@ -95,7 +95,7 @@ def test_pull_ignores_other_chat_but_advances_offset(run, bound):
 def test_pull_with_nothing_new_says_so_in_one_line(run, bound, capsys):
     assert run("pull") == 0
 
-    assert capsys.readouterr().out == "tm-bugs: no new report\n"
+    assert capsys.readouterr().out == "bugs-bot: no new report\n"
 
 
 def test_pull_passes_stored_offset_and_zero_timeout(run, bound):

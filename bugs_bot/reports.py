@@ -114,7 +114,7 @@ def retry_pending_reactions(channel: Channel, store: Store, chat_id: int) -> Non
         try:
             set_reaction(channel, chat_id, report, reaction["wanted"])
         except BugsError as exc:
-            print(f"tm-bugs: reaction on {report_id} pending: {mask(str(exc), channel.secret)}", file=sys.stderr)
+            print(f"bugs-bot: reaction on {report_id} pending: {mask(str(exc), channel.secret)}", file=sys.stderr)
         write_json(path / "report.json", report)
 
 
@@ -205,7 +205,7 @@ def say_reaction_pending(channel: Channel, failure: BugsError | None) -> int:
     """Report a pending reaction on stderr; return the matching exit code."""
     if failure is None:
         return 0
-    print(f"tm-bugs: reaction pending, `pull` will retry: {mask(str(failure), channel.secret)}", file=sys.stderr)
+    print(f"bugs-bot: reaction pending, `pull` will retry: {mask(str(failure), channel.secret)}", file=sys.stderr)
     return 1
 
 
