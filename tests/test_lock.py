@@ -115,6 +115,7 @@ def test_two_updates_of_a_report_interleaved_both_land(bound):
     got_through = []
 
     def first(rep: dict) -> None:
+        assert not lock_is_free(bound), "the change runs without the file lock"
         got_through.append(second.start_and_watch())
         rep["fix_ref"] = "abc1234"
 
@@ -136,6 +137,7 @@ def test_a_card_keeps_the_language_pull_records_while_the_agent_queues_a_questio
 
     def card_of_then_pull(*args):
         card = read(*args)
+        assert not lock_is_free(bound), "the card is read without the file lock"
         if not pull_writes.thread.is_alive() and not pull_writes.done.is_set():
             got_through.append(pull_writes.start_and_watch())
         return card
@@ -196,6 +198,7 @@ def test_the_purge_waits_for_an_update_in_progress(bound):
     got_through = []
 
     def triage(rep: dict) -> None:
+        assert not lock_is_free(bound), "the change runs without the file lock"
         got_through.append(purge.start_and_watch())
         rep["kind"] = "bug"
 
