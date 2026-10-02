@@ -141,7 +141,8 @@ def cmd_pull(channel: Channel | None, machine: Machine, now: float, poll_timeout
         purge: Also delete closed reports past retention.
 
     Raises:
-        BugsError: If a report could not be built, after every other one was.
+        BugsError: If a report could not be built, after every other one was (the first failure is
+            raised, the others are printed on stderr).
     """
     entries = machine.registry.entries()
     if not entries:
@@ -178,6 +179,9 @@ def cmd_pull(channel: Channel | None, machine: Machine, now: float, poll_timeout
         images = sum(len(attachments(m)) for m in group)
         print(f"new {report_id} ({images} image{'s' * (images != 1)}) in {project}")
     if failures:
+        # The caller says the first; the others would be lost, and each may be another project's.
+        for exc in failures[1:]:
+            print(f"bugs-bot: {mask(str(exc), channel.secret)}", file=sys.stderr)
         raise failures[0]
     if updates:
         # Only now is every kept update on disk: confirming earlier could lose a report.

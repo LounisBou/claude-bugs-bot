@@ -126,13 +126,14 @@ def test_a_failed_download_in_one_project_keeps_the_offset_and_blocks_no_other_p
     assert read_offset(bound) is None
 
 
-def test_the_redelivered_batch_does_not_duplicate_what_the_other_project_already_has(run, two, bound):
+def test_the_redelivered_batch_does_not_duplicate_what_the_other_project_already_has(run, two, bound, capsys):
     broken = message(10, 100, chat_id=OTHER_GROUP_ID, title="Other Bugs", caption="une image", photo="p1")
     fine = message(11, 101, text="un texte pour demo")
     tg = FakeTelegram([broken, fine])
     tg.fail_download = True
     assert run("pull", transport=tg) != 0
     [demo_first] = reports(bound)
+    assert f"new {demo_first.name} " in capsys.readouterr().out
     # the launcher works on it between the two pulls: a retry must not rewrite it
     handled = report_json(demo_first) | {"status": "taken", "kind": "bug"}
     (demo_first / "report.json").write_text(json.dumps(handled))
@@ -140,6 +141,9 @@ def test_the_redelivered_batch_does_not_duplicate_what_the_other_project_already
     tg.fail_download = False
     assert run("pull", transport=tg) == 0
 
+    # the report of the first pass is not announced a second time, only the one that is new
+    announced = [line for line in capsys.readouterr().out.splitlines() if line.startswith("new ")]
+    assert len(announced) == 1 and announced[0].endswith("in other")
     [demo] = reports(bound)
     # same report, same handling; only the pending 👀 reaction landed meanwhile
     assert demo.name == demo_first.name
@@ -149,6 +153,41 @@ def test_the_redelivered_batch_does_not_duplicate_what_the_other_project_already
     assert read_offset(bound) == 12
     # the whole batch was asked for again: the first pull confirmed nothing
     assert [c.get("offset") for c in tg.updates_calls()] == [None, None]
+
+
+def test_a_corrupt_unregistered_log_stalls_no_project(run, bound, capsys):
+    (bound.parent / "unregistered.json").write_text("{nope")
+    tg = FakeTelegram([message(10, 100, text="pour demo"), message(11, 5, chat_id=-5, title="Inconnu", text="x")])
+
+    assert run("pull", transport=tg) == 0
+
+    assert len(reports(bound)) == 1
+    assert "unregistered.json" in capsys.readouterr().err
+    assert set(Machine(bound.parent).unregistered()) == {-5}
+
+
+def test_a_corrupt_machine_state_fails_the_pull_naming_the_file(run, bound, capsys):
+    (bound.parent / "state.json").write_text("{nope")
+
+    assert run("pull", transport=FakeTelegram([message(10, 100, text="x")])) == 1
+
+    assert str(bound.parent / "state.json") in capsys.readouterr().err
+    assert reports(bound) == []
+
+
+def test_every_failure_of_a_batch_is_said_not_only_the_first(run, two, bound, capsys):
+    tg = FakeTelegram(
+        [
+            message(10, 100, caption="a", photo="p1"),
+            message(11, 200, chat_id=OTHER_GROUP_ID, title="Other Bugs", caption="b", photo="p2"),
+        ]
+    )
+    tg.fail_download = True
+
+    assert run("pull", transport=tg) == 1
+
+    err = capsys.readouterr().err
+    assert "download of p1-l" in err and "download of p2-l" in err
 
 
 def test_each_report_is_reacted_to_in_its_own_chat(run, two, bound):
