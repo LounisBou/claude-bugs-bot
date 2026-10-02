@@ -17,8 +17,7 @@ from bugs_bot.store import CLOSED_STATUSES, EMOJI_SEEN, Machine, Store, write_js
 from bugs_bot.registry import Entry
 from bugs_bot.telegram import TelegramChannel, attachments, author_of, group_messages, has_content, mask, read_token
 
-# Long polling (`pull --watch`): the channel holds a request until a message arrives or
-# POLL_TIMEOUT seconds pass.
+# Long polling (`pull --watch`): the channel holds a request until a message arrives or POLL_TIMEOUT seconds pass.
 POLL_TIMEOUT = 50
 # A failed watch round waits BACKOFF_FIRST s, doubling up to BACKOFF_CEILING; with no project registered, it waits UNBOUND_WAIT.
 BACKOFF_FIRST = 5
@@ -93,16 +92,13 @@ def purge_old_done(store: Store, now: float) -> None:
 
 
 def follow_migrations(machine: Machine, entries: dict[int, Entry], updates: list[dict]) -> dict[int, int]:
-    """Re-register the projects whose group was promoted to a supergroup (it gets a new chat id).
+    """Re-register the projects whose group was promoted to a supergroup (new chat id), updating ``entries`` in place.
 
-    ``entries`` is updated in place, the project file and then the registry are rewritten: a
-    failure between the two is retried by the next pull (the batch is delivered again) and finds
-    the file already done.
+    The project file is rewritten before the registry: a retry after a failure between the two finds it done.
 
     Returns:
-        ``{old chat id: new chat id}`` for every migration in ``updates``, whether or not its
-        project is still registered under the old id (a redelivered batch finds it already moved):
-        messages sent before the promotion in the same batch still carry the old id.
+        ``{old: new chat id}`` of every migration in ``updates``, even one already followed (a redelivered
+        batch): messages sent before the promotion still carry the old id.
 
     Raises:
         BugsError: If a project file or the registry cannot be rewritten.
@@ -119,8 +115,7 @@ def follow_migrations(machine: Machine, entries: dict[int, Entry], updates: list
         entry = entries[old]
         rebind_chat(entry.repo / PROJECT_FILE, new)
         machine.registry.add(new, entry.project, entry.repo)
-        del entries[old]
-        entries[new] = entry
+        entries[new] = entries.pop(old)
         print(f"bugs-bot: group migrated, project {entry.project} rebound to chat {new}")
     return aliases
 
@@ -141,8 +136,7 @@ def cmd_pull(channel: Channel | None, machine: Machine, now: float, poll_timeout
         purge: Also delete closed reports past retention.
 
     Raises:
-        BugsError: If a report could not be built, after every other one was (the first failure is
-            raised, the others are printed on stderr).
+        BugsError: If a report could not be built, after every other one was (the others go to stderr).
     """
     entries = machine.registry.entries()
     if not entries:
@@ -158,8 +152,7 @@ def cmd_pull(channel: Channel | None, machine: Machine, now: float, poll_timeout
     kept: dict[int, list[dict]] = {}
     for update in updates:
         msg = update.get("message") or {}
-        chat_id = (msg.get("chat") or {}).get("id")
-        chat_id = aliases.get(chat_id, chat_id)
+        chat_id = aliases.get(old := (msg.get("chat") or {}).get("id"), old)
         if chat_id in entries and has_content(msg):
             kept.setdefault(chat_id, []).append(msg)
     created, failures = [], []
@@ -179,8 +172,7 @@ def cmd_pull(channel: Channel | None, machine: Machine, now: float, poll_timeout
         images = sum(len(attachments(m)) for m in group)
         print(f"new {report_id} ({images} image{'s' * (images != 1)}) in {project}")
     if failures:
-        # The caller says the first; the others would be lost, and each may be another project's.
-        for exc in failures[1:]:
+        for exc in failures[1:]:  # the caller says the first one
             print(f"bugs-bot: {mask(str(exc), channel.secret)}", file=sys.stderr)
         raise failures[0]
     if updates:
