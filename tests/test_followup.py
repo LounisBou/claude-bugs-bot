@@ -165,6 +165,40 @@ def test_the_delay_comes_from_the_project_file(at, asked, capsys):
     assert capsys.readouterr().out.startswith(f"follow-up {FIRST}")
 
 
+# The four places the project's follow_up_hours is read; each must take it from the project file.
+DELAY_READERS = {
+    "overdue": ["overdue"],
+    "wait": ["wait", "--timeout", "0"],
+    "pending": ["pending"],
+    "reply": ["reply", FIRST, "Petite relance ?", "--follow-up"],
+}
+
+
+def followed_up(asked: Path, out: str, command: str) -> bool:
+    """Tell whether ``command`` saw the wait as due: it listed it, or (reply) it sent the reminder."""
+    return "reminded" in awaiting(asked) if command == "reply" else f"follow-up {FIRST}" in out
+
+
+@pytest.mark.parametrize("command", DELAY_READERS)
+def test_every_command_takes_the_delay_from_the_project_file(at, asked, capsys, command):
+    set_hours(2)
+    capsys.readouterr()
+
+    assert at(BASE_DATE + 2 * HOUR + 1, *DELAY_READERS[command]) == 0
+
+    assert followed_up(asked, capsys.readouterr().out, command)
+
+
+@pytest.mark.parametrize("command", DELAY_READERS)
+def test_no_command_sees_the_wait_due_before_the_project_files_delay(at, asked, capsys, command):
+    set_hours(2)
+    capsys.readouterr()
+
+    at(BASE_DATE + 2 * HOUR - 1, *DELAY_READERS[command])
+
+    assert not followed_up(asked, capsys.readouterr().out, command)
+
+
 def test_a_closed_report_is_never_followed_up(at, asked, capsys):
     at(BASE_DATE + 60, "done", FIRST)
     capsys.readouterr()
@@ -269,6 +303,57 @@ def test_pending_shows_due_follow_ups_and_unanswered_ones(at, asked, bound, caps
     out = capsys.readouterr().out
     assert f"follow-up {FIRST}" in out
     assert f"unanswered {second}" in out
+
+
+# -- exact bounds and exact output ---------------------------------------------------------------
+
+
+def test_the_follow_up_is_due_exactly_at_the_delay_and_the_unanswered_exactly_a_delay_after_the_reminder(
+    at, asked, capsys
+):
+    assert at(BASE_DATE + DAY - 1, "overdue") == 0
+    assert capsys.readouterr().out == ""
+    assert at(BASE_DATE + DAY, "overdue") == 0
+    assert capsys.readouterr().out == f"follow-up {FIRST}  Laura  since 2026-10-02T08:30  Tu es sur quel iPhone ?\n"
+    at(BASE_DATE + DAY, "reply", FIRST, "Petite relance ?", "--follow-up")
+    capsys.readouterr()
+
+    assert at(BASE_DATE + 2 * DAY - 1, "overdue") == 0
+    assert capsys.readouterr().out == ""
+    assert at(BASE_DATE + 2 * DAY, "overdue") == 0
+    assert capsys.readouterr().out == f"unanswered {FIRST}  Laura  since 2026-10-02T08:30  Tu es sur quel iPhone ?\n"
+
+
+@pytest.fixture
+def one_due_one_unanswered(at, asked, capsys) -> str:
+    """``FIRST`` is due its reminder; a second report (Mathis) was reminded and is unanswered. Returns its id."""
+    tg = FakeTelegram([person_message(11, 101, user_id=8, name="Mathis", date=BASE_DATE + 10, text="le bouton ne répond pas")])
+    at(BASE_DATE + 20, "pull", transport=tg)
+    second = "20261002-083010-101"
+    at(BASE_DATE + 30, "triage", second, "question")
+    at(BASE_DATE + 40, "reply", second, "Tu as quel navigateur ?", "--awaits")
+    at(BASE_DATE + DAY + 40, "reply", second, "Relance", "--follow-up")
+    capsys.readouterr()
+    return second
+
+
+def test_wait_prints_exactly_the_follow_up_then_the_unanswered(at, one_due_one_unanswered, capsys):
+    assert at(BASE_DATE + 2 * DAY + 41, "wait") == 0
+
+    assert capsys.readouterr().out == f"follow-up {FIRST}\nunanswered {one_due_one_unanswered}\n"
+
+
+def test_pending_prints_exactly_the_open_reports_then_the_overdue_waits(at, one_due_one_unanswered, capsys):
+    second = one_due_one_unanswered
+
+    assert at(BASE_DATE + 2 * DAY + 41, "pending") == 0
+
+    assert capsys.readouterr().out == (
+        f"{FIRST}  bug       seen   Laura  ça plante\n"
+        f"{second}  question  seen   Mathis  le bouton ne répond pas\n"
+        f"follow-up {FIRST}  Laura  since 2026-10-02T08:30  Tu es sur quel iPhone ?\n"
+        f"unanswered {second}  Mathis  since 2026-10-02T08:30  Tu as quel navigateur ?\n"
+    )
 
 
 # -- the rules are written down ----------------------------------------------------------------
