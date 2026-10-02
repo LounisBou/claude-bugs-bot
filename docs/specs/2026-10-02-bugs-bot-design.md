@@ -72,7 +72,7 @@ A small interface with TWO implementations, Telegram and Slack (standard library
 `poll(cursor, chats, timeout)` returns a batch of messages already normalised — chat, message id,
 date, author (id, username, display name, language when the platform gives one, bot or not), text,
 attachments, media-group key — plus the chats seen and the group migrations, and the next cursor;
-`send`, `edit`, `react`, `get_file`, `list_admins`, `member_count` as before. Chat and message ids
+`send`, `edit`, `delete`, `react`, `get_file`, `list_admins`, `member_count`. Chat and message ids
 are `int | str` (Slack's are strings). Reading never consumes: only the caller saving the returned
 cursor moves it. A factory, `channel_for(kind, env, transport)`, is the one place that names the
 implementations; nothing else imports or names a platform's API, token or URL. Each token is read by
@@ -173,9 +173,21 @@ launcher, wait armed).
   enregistrée comme info pour chaque utilisateur. »):** each person's card carries `language`.
   Pull records it on first sight from the platform (Telegram `language_code`, Slack `locale`), never
   over a value already there; the agent corrects it with `bugs-bot person-lang <ref> <code>` when
-  the person writes in another language. Every message to a person is written in their language;
-  the CLI's own fixed words (« Corrigé : » of `fixed --note`) come from a table per language
-  (`fr`, `en`), the person's language first, then the project's `language`, then `en`.
+  the person writes in another language. Every message to a person is written in their language:
+  the person's language first, then the project's `language`.
+- **No developer reference reaches a person (operator, 2026-10-02):** « Tu peux pas parler comme
+  "Corrigé #680" à un utilisateur pour signaler qu'un bug est corrigé dans une PR #680, un
+  utilisateur ce n'est pas un dev, il n'a pas d'info sur le dev, ni les PR ça n'a pas de sens pour
+  lui et ce n'est pas une phrase. » `fixed <id> --note "<ref>"` records the ref in the report and
+  posts nothing; the agent tells the person in its own sentence, in their language and voice, that
+  it is fixed (and, once deployed, asks them to check — « vérifier »). No PR number, commit, branch
+  or ticket id is ever posted in the group.
+- **Edit and delete (operator, 2026-10-02):** « le plugin doit permettre à l'agent de modifier et
+  supprimer des messages au besoin ». The agent may rewrite (`edit`) or delete (`delete <id>
+  [--reply N]`) a message it posted, on its own judgment — a wrong fact, a duplicate, a message
+  posted on the wrong report — not only on its launcher's « réécrire ». A deleted reply stays in the
+  report, marked deleted with its date; a deleted message that awaited an answer no longer awaits.
+  The bot's own messages only: a tester's message is never edited or deleted.
 - **One question at a time (operator, 2026-10-02):** « Il faut que l'agent évite de poser trop de
   question d'un coup à un utilisateur, il pose une question à la fois, même si l'utilisateur à lui
   même déclenché plusieurs sujet, l'agent traite les sujets en paralléle mais n'intéroge
