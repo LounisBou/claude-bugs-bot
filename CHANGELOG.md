@@ -22,7 +22,8 @@ First release: the single-project Telegram bug relay, made a generic Claude Code
   follow-ups after `follow_up_hours`; `gate --measure` and `deployed`.
 - `docs/migration/`: the script and runbook moving the previous single-project layout, the update
   offset copied exactly and the token written with mode 0600.
-- `tests/e2e.sh`: two projects driven through `bin/bugs-bot` against a fake Bot API.
+- `tests/e2e.sh`: two Telegram projects and one Slack project driven through `bin/bugs-bot` against a
+  fake Bot API and a fake Slack API.
 - `BUGS_BOT_API_ROOT`, to point the Telegram channel at that fake (end-to-end runs only).
 - Slack beside Telegram, ONE channel per project chosen at `init` (`--channel slack`): the project
   file's `channel`, a registry keyed `<channel>:<chat_id>`, Slack read by polling
