@@ -6,11 +6,13 @@ import json
 from pathlib import Path
 
 import pytest
+from fake_slack import CHANNEL, SLACK_TOKEN, FakeSlack, ts
 from samples import GROUP_ID, TOKEN, FakeTelegram, parse_multipart
 
 from bugs_bot.channel import ImagesNotSent, multipart
 from bugs_bot.errors import BugsError
 from bugs_bot.images import MAX_BYTES, MAX_IMAGES, check_images, record_sent
+from bugs_bot.slack import SlackChannel
 from bugs_bot.telegram import TelegramChannel
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
@@ -226,3 +228,72 @@ def test_the_http_transport_sends_an_upload_as_its_bytes_and_content_type(monkey
 
     assert status == 200
     assert (seen["data"], seen["type"], seen["auth"]) == (body.data, body.content_type, "Bearer x")
+
+
+# -- Slack: files.getUploadURLExternal and the upload per file, then one files.completeUploadExternal
+
+
+def slack() -> tuple[SlackChannel, FakeSlack]:
+    api = FakeSlack()
+    return SlackChannel(SLACK_TOKEN, api), api
+
+
+def test_slack_uploads_each_image_then_shares_them_all_in_one_message(tmp_path):
+    channel, api = slack()
+    paths = check_images([image(tmp_path, "a shot.png"), image(tmp_path, "b", JPEG)])
+
+    sent = channel.send_images(CHANNEL, "Voilà les deux écrans", paths)
+
+    assert api.methods() == ["files.getUploadURLExternal", "ticket1", "files.getUploadURLExternal", "ticket2", "files.completeUploadExternal"]
+    assert api.of("files.getUploadURLExternal") == [{"filename": "image-1.png", "length": str(len(PNG))}, {"filename": "image-2.jpg", "length": str(len(JPEG))}]
+    assert [parse_multipart(upload["body"])["files"] for upload in api.uploads] == [
+        {"filename": ("image-1.png", PNG, "image/png")},
+        {"filename": ("image-2.jpg", JPEG, "image/jpeg")},
+    ]
+    assert api.of("files.completeUploadExternal") == [
+        {"files": [{"id": "F0FILE1", "title": "image-1.png"}, {"id": "F0FILE2", "title": "image-2.jpg"}],
+         "channel_id": CHANNEL, "initial_comment": "Voilà les deux écrans"}
+    ]
+    assert all(call["headers"] == {"Authorization": f"Bearer {SLACK_TOKEN}"} for call in api.calls)
+    assert sent == [{"message_id": None, "text": "Voilà les deux écrans"}]
+
+
+def test_slack_posts_the_images_in_the_reports_thread_with_the_mention(tmp_path):
+    channel, api = slack()
+
+    sent = channel.send_images(CHANNEL, "regarde", check_images([image(tmp_path, "a.png")]), reply_to=ts(1), mention={"user_id": "U0ANA", "username": None, "name": "Ana"})
+
+    complete = api.of("files.completeUploadExternal")[0]
+    assert (complete["thread_ts"], complete["initial_comment"]) == (ts(1), "<@U0ANA> regarde")
+    assert sent == [{"message_id": None, "text": "<@U0ANA> regarde"}]
+
+
+def test_slack_a_failed_second_upload_shares_nothing(tmp_path):
+    channel, api = slack()
+    api.upload_status[2] = 500
+
+    with pytest.raises(BugsError, match="upload of image-2.jpg: HTTP 500") as failed:
+        channel.send_images(CHANNEL, "deux", check_images([image(tmp_path, "a.png"), image(tmp_path, "b", JPEG)]))
+
+    assert "files.completeUploadExternal" not in api.methods()
+    assert SLACK_TOKEN not in str(failed.value)
+
+
+def test_slack_a_refused_share_is_an_error_without_the_token(tmp_path):
+    channel, api = slack()
+    api.answers["files.completeUploadExternal"] = {"ok": False, "error": "missing_scope"}
+
+    with pytest.raises(BugsError, match="files.completeUploadExternal: missing_scope") as failed:
+        channel.send_images(CHANNEL, "x", check_images([image(tmp_path, "a.png")]))
+
+    assert SLACK_TOKEN not in str(failed.value)
+
+
+def test_slack_never_uploads_to_a_host_that_is_not_slack(tmp_path):
+    channel, api = slack()
+    api.answers["files.getUploadURLExternal"] = {"ok": True, "upload_url": "https://evil.example/upload/x", "file_id": "F1"}
+
+    with pytest.raises(BugsError, match="upload refused: the URL is not on Slack"):
+        channel.send_images(CHANNEL, "x", check_images([image(tmp_path, "a.png")]))
+
+    assert api.uploads == [] and "files.completeUploadExternal" not in api.methods()
