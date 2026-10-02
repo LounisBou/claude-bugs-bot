@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 
 from bugs_bot.errors import BugsError
+from bugs_bot.jsonio import write_json
 
 DEFAULT_HOME = Path.home() / ".torrentmate" / "tm-bugs"
 # Statuses still waiting for a fix, and those that retention may delete.
@@ -18,14 +18,6 @@ CLOSED_STATUSES = {"done", "fixed"}
 EMOJI_SEEN = "\U0001f440"  # 👀
 EMOJI_TAKEN = "\U0001f468‍\U0001f4bb"  # 👨‍💻
 EMOJI_FIXED = "\U0001f44c"  # 👌
-
-
-def write_json(path: Path, data: dict) -> None:
-    """Write JSON atomically: a temp file in the same directory, then rename."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
-    os.replace(tmp, path)
 
 
 class Store:
