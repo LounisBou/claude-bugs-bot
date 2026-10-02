@@ -185,20 +185,28 @@ def cmd_delete(
     """Delete a reply the bot posted on a report: the last one, or the ``number``-th (1-based, as ``show`` numbers them).
 
     The reply stays in ``report.json``, marked ``deleted`` with the date: the record of what was said is
-    kept. A wait that pointed at it is lifted: a deleted question awaits no answer.
+    kept. A wait that pointed at it is lifted: a deleted question awaits no answer. A message the
+    group no longer has (« message to delete not found ») is marked the same, and said so.
 
     Raises:
-        BugsError: On no such reply, a reply without ``message_id`` or already deleted, or a channel error
-            (then nothing is marked).
+        BugsError: On no such reply, a reply without ``message_id`` or already deleted, or another channel
+            error (then nothing is marked).
     """
     path, report = load_report(store, report_id)
     number, reply = posted_reply(report, number, "deleted")
-    channel.delete(report.get("chat_id", chat_id), reply["message_id"])
+    gone = ""
+    try:
+        channel.delete(report.get("chat_id", chat_id), reply["message_id"])
+    except BugsError as exc:
+        # Deleted already (by an admin, or a delete whose answer was lost): the outcome is the one wanted.
+        if "message to delete not found" not in str(exc):
+            raise
+        gone = " (already gone from the group)"
     reply["deleted"] = datetime.fromtimestamp(now, timezone.utc).isoformat()
     if (report.get("awaiting") or {}).get("reply") == number:
         del report["awaiting"]
     write_json(path / "report.json", report)
-    print(f"deleted reply {number} of {report_id}")
+    print(f"deleted reply {number} of {report_id}{gone}")
 
 
 def cmd_taken(channel: Channel, store: Store, chat_id: int, report_id: str) -> int:

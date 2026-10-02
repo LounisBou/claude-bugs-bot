@@ -105,6 +105,35 @@ def test_a_refused_delete_marks_nothing(replied):
     assert report(replied)["replies"] == REPLIES
 
 
+def test_a_reply_already_gone_from_the_group_is_marked_deleted_and_lifts_the_wait(bound, capsys):
+    class Gone(FakeChannel):
+        def delete(self, chat_id, message_id):
+            raise BugsError("deleteMessage: Bad Request: message to delete not found")
+
+    awaiting = {"since": "2026-10-02T08:32:00+00:00", "reply": 2}
+    write_report(bound, 5, author="Laura", author_id=7, replies=[dict(r) for r in REPLIES], awaiting=awaiting)
+
+    cmd_delete(Gone(), Store(bound), GROUP_ID, REPORT, BASE_DATE, 2)
+
+    assert report(bound)["replies"][1]["deleted"] == "2026-10-02T08:30:00+00:00"
+    assert "awaiting" not in report(bound)
+    assert capsys.readouterr().out == f"deleted reply 2 of {REPORT} (already gone from the group)\n"
+
+
+def test_a_refused_delete_keeps_the_wait(bound):
+    class Refusing(FakeChannel):
+        def delete(self, chat_id, message_id):
+            raise BugsError("deleteMessage: Bad Request: message can't be deleted")
+
+    awaiting = {"since": "2026-10-02T08:32:00+00:00", "reply": 2}
+    write_report(bound, 5, author="Laura", author_id=7, replies=[dict(r) for r in REPLIES], awaiting=awaiting)
+
+    with pytest.raises(BugsError, match="can't be deleted"):
+        cmd_delete(Refusing(), Store(bound), GROUP_ID, REPORT, BASE_DATE, 2)
+
+    assert report(bound)["awaiting"] == awaiting and "deleted" not in report(bound)["replies"][1]
+
+
 # -- through the command line ----------------------------------------------------------------
 
 
