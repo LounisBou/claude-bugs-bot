@@ -464,3 +464,40 @@ def test_a_pull_reads_slack_back_from_its_own_time_never_the_machine_s_date(bugs
 
     assert api.of("conversations.history")[0]["oldest"] == f"{NOW - week - 86400:.6f}"
     assert len(reports_of(bugs_home, "sla")) == 1
+
+
+def test_a_telegram_failure_never_keeps_slack_unread(tmp_path, bugs_home, slack_repo, env, capsys):
+    register(bugs_home, tmp_path / "repo-tg", "tele", GROUP_ID, "Tele Bugs")
+    tg = FakeTelegram([message(5, 50, text="perdu pour ce tour")])
+    tg.api_error = {"ok": False, "error_code": 502, "description": "Bad Gateway"}
+    api = FakeSlack()
+    api.history[CHANNEL] = [msg(ts(1), "un bug slack")]
+
+    code = cli.main(["pull"], transport=Both(tg, api), env=env, now=NOW)
+
+    assert code == 1 and "Bad Gateway" in capsys.readouterr().err
+    assert reports_of(bugs_home, "tele") == {} and len(reports_of(bugs_home, "sla")) == 1
+    assert Machine(bugs_home).load_cursor("slack") == {CHANNEL: {"ts": ts(1), "threads": {}}}
+    assert Machine(bugs_home).load_cursor("telegram") is None
+
+
+def test_one_slack_chat_s_failure_never_keeps_another_unread(tmp_path, bugs_home, slack_repo, env, capsys):
+    # Projects are read in registration order: the failing one first.
+    register(bugs_home, tmp_path / "repo-sla2", "sla2", "G0SECOND", "sla2-bugs", channel="slack")
+    api = FakeSlack()
+    api.history["G0SECOND"] = [msg(ts(2), "un bug du second", "U0BOB")]
+    real = api._answer
+
+    def answer(method: str, params: dict) -> dict:
+        if method == "conversations.history" and params["channel"] == CHANNEL:
+            return {"ok": False, "error": "channel_not_found"}
+        return real(method, params)
+
+    api._answer = answer
+
+    code = cli.main(["pull"], transport=Both(FakeTelegram(), api), env=env, now=NOW)
+
+    assert code == 1 and "conversations.history: channel_not_found" in capsys.readouterr().err
+    assert [c["params"]["channel"] for c in api.calls if c["method"] == "conversations.history"] == [CHANNEL, "G0SECOND"]
+    assert reports_of(bugs_home, "sla") == {} and len(reports_of(bugs_home, "sla2")) == 1
+    assert Machine(bugs_home).load_cursor("slack") == {"G0SECOND": {"ts": ts(2), "threads": {}}}
