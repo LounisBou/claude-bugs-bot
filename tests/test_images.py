@@ -414,13 +414,14 @@ README = DOCS["AGENT.md"].parents[1] / "README.md"
 @pytest.mark.parametrize(
     "phrase",
     [
-        "« capture <id> : <what the screenshot must show> »",
+        "« <your title> — capture <id> : <what the screenshot must show> »",
+        "The only images you send are those your launcher gave you in a « capture » answer — never an image from a report",
+        "Never ask for one when words suffice",
         "« capture <id> <path> [<path> …] »",
         "--image <path>",
         "Open every image with the Read tool before sending it",
         "code, a terminal, a pull request, a commit, a branch, an internal URL or host, a local path, a token, or another person's data",
         "saying what to hide",
-        "never when words suffice",
         "ask first, show after",
     ],
 )
@@ -431,6 +432,12 @@ def test_the_agent_knows_how_to_ask_for_look_at_and_send_a_screenshot(phrase):
 @pytest.mark.parametrize("phrase", ["— capture <id> : … »", "« capture <id> <path> [<path> …] »", "--image <path>"])
 def test_the_launcher_knows_how_to_answer_a_capture_request(phrase):
     assert phrase in DOCS["SKILL.md"].read_text()
+
+
+def test_the_agent_asks_for_a_capture_with_the_line_the_launcher_expects():
+    # SKILL.md expects « <agent title> — capture <id> : … », as every other line to the launcher.
+    assert "« <your title> — capture <id> :" in DOCS["AGENT.md"].read_text()
+    assert "« <agent title> — capture <id> : … »" in DOCS["SKILL.md"].read_text()
 
 
 @pytest.mark.parametrize("phrase", ["files:write", "--image"])
