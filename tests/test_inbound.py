@@ -265,3 +265,13 @@ def test_mask_hides_the_secret_and_any_bot_token_shape():
     assert mask("secret part AAFakeTokenFakeTokenFakeTokenFake123", TOKEN) == "secret part <token>"
     assert mask("GET /bot999:ABCdef_ghi-123/getMe", None) == "GET /bot<token>/getMe"
     assert mask("nothing here", None) == "nothing here"
+
+
+def test_init_with_a_refused_api_root_fails_instead_of_going_without_a_channel(env, tmp_path, capsys):
+    from bugs_bot import cli
+
+    bad = {**env, "BUGS_BOT_API_ROOT": "http://evil.example"}
+
+    assert cli.main(["init", "--repo", str(tmp_path), "--project", "demo", "--agent-title", "A"], transport=FakeTelegram(), env=bad) == 1
+
+    assert "BUGS_BOT_API_ROOT must be" in capsys.readouterr().err
