@@ -9,6 +9,7 @@ import pytest
 from conftest import read_offset, register, reports
 from samples import BASE_DATE, GROUP_ID, OTHER_GROUP_ID, FakeTelegram, message
 
+from bugs_bot import cli
 from bugs_bot.project import PROJECT_FILE
 from bugs_bot.registry import Registry
 from bugs_bot.store import Machine
@@ -279,3 +280,21 @@ def test_the_registry_and_the_project_file_follow_a_migrated_chat(run, bound, tm
     assert "rebound" in capsys.readouterr().out
     # the old id is dead: it is not offered as a new group either
     assert Machine(bound.parent).unregistered() == {}
+
+
+PROJECT_COMMANDS = [
+    ["list"], ["show", "i"], ["reply", "i", "t"], ["edit", "i", "t"], ["fixed", "i"], ["taken", "i"], ["done", "i"],
+    ["triage", "i", "bug"], ["wait"], ["pending"], ["post", "t"], ["backfill-authors"], ["agent-prompt", "--launcher", "l"],
+    ["gate"], ["person", "r"], ["person-note", "r", "t"],
+]
+
+
+@pytest.mark.parametrize("argv", PROJECT_COMMANDS, ids=lambda a: a[0])
+def test_every_project_command_takes_project(argv):
+    assert cli.build_parser().parse_args([*argv, "--project", "x"]).project == "x"
+    assert cli.build_parser().parse_args(argv).project is None
+
+
+def test_pull_is_machine_wide_and_takes_no_project():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["pull", "--project", "x"])
