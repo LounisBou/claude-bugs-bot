@@ -180,3 +180,17 @@ def test_agent_md_carries_both_sides_of_the_succession():
         "--expect-title",
     ):
         assert needle in text, needle
+
+
+def test_gate_set_names_the_file_it_cannot_write(run, bound, monkeypatch, capsys):
+    before = project_file().read_text()
+
+    def refuse(path, data):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr("bugs_bot.gate.write_json", refuse)
+
+    assert run("gate", "--set", "200000") == 1
+
+    assert f"cannot write {project_file()}: Permission denied" in capsys.readouterr().err
+    assert project_file().read_text() == before

@@ -96,7 +96,7 @@ def cmd_gate(
         env: The environment (where the gauge is, and what it reads).
 
     Raises:
-        BugsError: If ``set_to`` is not positive, figures are both given and measured, or the gauge fails.
+        BugsError: If ``set_to`` is not positive or the project file cannot be written, figures are both given and measured, or the gauge fails.
     """
     if measure_now and (window is not None or tokens is not None):
         raise BugsError("--measure reads the window and the tokens itself: give neither")
@@ -104,7 +104,11 @@ def cmd_gate(
     if set_to is not None:
         if set_to <= 0:
             raise BugsError(f"the gate must be a positive number of tokens, got {set_to}")
-        write_json(project.repo / PROJECT_FILE, dump_project(replace(project, gate_tokens=set_to)))
+        path = project.repo / PROJECT_FILE
+        try:
+            write_json(path, dump_project(replace(project, gate_tokens=set_to)))
+        except OSError as exc:
+            raise BugsError(f"cannot write {path}: {exc.strerror or exc}") from None
         gate = set_to
     if measure_now:
         tokens, window = measure(env, _run_gauge(env))
