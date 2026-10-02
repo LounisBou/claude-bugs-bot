@@ -219,6 +219,23 @@ def test_a_command_never_reaches_another_projects_report(run, two, bound, capsys
     assert "no such report" in capsys.readouterr().err
 
 
+def test_a_report_id_cannot_walk_into_another_projects_inbox(run, two, bound, capsys):
+    write_report(two, "20261002-083000-2", "secret de other", OTHER_GROUP_ID)
+
+    assert run("show", "../../other/inbox/20261002-083000-2", "--project", "demo") == 1
+
+    captured = capsys.readouterr()
+    assert "invalid report id" in captured.err
+    assert "secret de other" not in captured.out + captured.err
+
+
+@pytest.mark.parametrize("bad", ["ok/../../x", "ok/..", "a/b", ".hidden", "", "ok\n"])
+def test_a_report_id_with_a_separator_or_a_leading_dot_is_refused(run, bound, bad, capsys):
+    assert run("show", bad) == 1
+
+    assert "invalid report id" in capsys.readouterr().err
+
+
 def test_a_reply_goes_to_the_chat_of_the_project_it_is_for(run, two, bound):
     write_report(two, "20261002-083000-2", "du côté other", OTHER_GROUP_ID)
     tg = FakeTelegram()

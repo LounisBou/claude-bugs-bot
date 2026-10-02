@@ -62,6 +62,10 @@ def test_load_applies_the_defaults_to_a_minimal_file(tmp_path):
     [
         ({"project": "Demo"}, "project"),
         ({"project": "../x"}, "project"),
+        ({"project": "demo/../x"}, "project"),
+        ({"project": "a/b"}, "project"),
+        ({"project": "a b"}, "project"),
+        ({"project": "demo\n"}, "project"),
         ({"project": ""}, "project"),
         ({"project": None}, "project"),
         ({"group": {"title": "T"}}, "chat_id"),

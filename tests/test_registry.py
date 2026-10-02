@@ -84,10 +84,21 @@ def test_an_unparseable_or_misshapen_file_is_a_clear_error(registry, content):
         registry.entries()
 
 
-def test_add_refuses_a_project_id_that_could_leave_the_home(registry, tmp_path):
+BAD_IDS = ["../evil", "demo/../x", "a/b", "a b", "demo\n"]
+
+
+@pytest.mark.parametrize("bad", BAD_IDS)
+def test_add_refuses_a_project_id_that_could_leave_the_home(registry, tmp_path, bad):
     with pytest.raises(BugsError, match="project"):
-        registry.add(-1, "../evil", tmp_path)
+        registry.add(-1, bad, tmp_path)
     assert not registry.path.exists()
+
+
+@pytest.mark.parametrize("bad", BAD_IDS)
+def test_a_file_entry_with_a_project_id_that_could_leave_the_home_is_refused(registry, bad):
+    registry.path.write_text(json.dumps({"1": {"project": bad, "repo": "/r"}}))
+    with pytest.raises(BugsError, match="projects.json"):
+        registry.entries()
 
 
 def test_a_corrupt_file_is_never_overwritten_by_add(registry, tmp_path):

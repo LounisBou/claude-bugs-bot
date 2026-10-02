@@ -72,7 +72,7 @@ def test_project_store_is_the_project_directory(machine, tmp_path):
     assert isinstance(store, Store) and store.home == tmp_path / "home" / "demo"
 
 
-@pytest.mark.parametrize("bad", ["../x", "a/b", "Demo", "", ".", "..", "a b"])
+@pytest.mark.parametrize("bad", ["../x", "a/b", "Demo", "", ".", "..", "a b", "demo/../x", "demo\n"])
 def test_project_store_refuses_an_id_that_could_leave_the_home(machine, bad):
     with pytest.raises(BugsError, match="project"):
         machine.project_store(bad)
