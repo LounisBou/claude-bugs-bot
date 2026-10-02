@@ -14,7 +14,7 @@ from bugs_bot.channels import channel_for
 from bugs_bot.errors import BugsError
 from bugs_bot.followup import clear_answered
 from bugs_bot.people import record_language
-from bugs_bot.reports import retry_pending_reactions
+from bugs_bot.reactions import retry_pending_reactions
 from bugs_bot.project import PROJECT_FILE, rebind_chat
 from bugs_bot.store import CLOSED_STATUSES, EMOJI_SEEN, Machine, Store, write_json
 from bugs_bot.registry import Entry
