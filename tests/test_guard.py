@@ -6,6 +6,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from conftest import REPO_ROOT
 
 # The names of the first project the plugin served. This file names them to look for them, so it is
@@ -34,18 +36,29 @@ def project_names_in(root: Path, paths: list[str]) -> list[str]:
     return found
 
 
+def test_the_guard_searches_the_plugin_not_an_empty_list():
+    # An empty list of tracked files would let the guard pass without looking at anything.
+    files = tracked_files()
+
+    assert "bugs_bot/cli.py" in files and "agent/AGENT.md" in files
+
+
 def test_no_file_of_the_plugin_names_a_project():
     assert project_names_in(REPO_ROOT, tracked_files()) == []
 
 
-def test_the_guard_sees_a_planted_name(tmp_path):
-    (tmp_path / "bugs_bot").mkdir()
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "bugs_bot" / "probe.py").write_text("ok\n# served by torrentMATE\n")
-    (tmp_path / "docs" / "spec.md").write_text("TorrentMate\n")
-    (tmp_path / "tests").mkdir()
-    (tmp_path / SELF).write_text("PersonalScraper\n")
+# Where a name is a defect (the plugin's code, instructions, commands and tests) and where it is
+# allowed (the design documents, the fixtures, and this file, which spells the names to search them).
+SEARCHED = ["agent/AGENT.md", "skills/bugs-bot/SKILL.md", "commands/start.md", "bugs_bot/cli.py", "tests/x.py"]
+ALLOWED = ["docs/specs/design.md", "tests/fixtures/sample.json", SELF]
 
-    found = project_names_in(tmp_path, ["bugs_bot/probe.py", "docs/spec.md", SELF])
 
-    assert found == ["bugs_bot/probe.py:2: # served by torrentMATE"]
+@pytest.mark.parametrize("name", ["TorrentMate", "torrentmate", "PersonalScraper", "tm-design"])
+def test_the_guard_sees_each_name_where_it_is_forbidden_and_only_there(tmp_path, name):
+    for path in SEARCHED + ALLOWED:
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(f"ok\n# served by {name}\n")
+
+    found = project_names_in(tmp_path, SEARCHED + ALLOWED)
+
+    assert found == [f"{path}:2: # served by {name}" for path in SEARCHED]
