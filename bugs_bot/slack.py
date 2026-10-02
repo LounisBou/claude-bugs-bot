@@ -27,6 +27,14 @@ FILE_HOSTS = ("slack.com", ".slack.com")
 GONE = "message to react not found"
 
 
+class Refused(BugsError):
+    """Slack answered the call, ``ok: false`` with an error code (HTTP 200): a refusal, not a failure to reach it."""
+
+    def __init__(self, method: str, error: str) -> None:
+        super().__init__(f"{method}: {error}")
+        self.error = error
+
+
 def api_root(env: Mapping[str, str]) -> str:
     """Return the Web API root: ``BUGS_BOT_SLACK_API_ROOT`` when set (the end-to-end run's fake), else Slack's.
 
@@ -81,7 +89,8 @@ class SlackChannel:
 
         Raises:
             RateLimited: On HTTP 429, carrying the ``Retry-After`` seconds (0 when Slack gave none).
-            BugsError: On ``ok: false`` (whatever the HTTP status) or an unreadable answer.
+            Refused: On ``ok: false`` with an error code, over HTTP 200.
+            BugsError: On any other ``ok: false`` or an unreadable answer.
         """
         if post:
             status, body = self._transport(f"{self._root}/{method}", params, None, self._auth())
@@ -98,13 +107,22 @@ class SlackChannel:
             raise BugsError(f"{method}: HTTP {status}, answer is not JSON") from None
         if not isinstance(answer, dict) or not answer.get("ok"):
             error = answer.get("error") if isinstance(answer, dict) else None
+            if status == 200 and error:
+                raise Refused(method, error)
             raise BugsError(f"{method}: {error or f'HTTP {status}'}")
         return answer
 
     def _author(self, user_id: str) -> Author:
-        """Return a member as an ``Author``, asked once per channel object (a poll round)."""
+        """Return a member as an ``Author``, asked once per channel object (a poll round).
+
+        A member Slack will not describe (``user_not_found``, a scope missing…) is named by their id: failing
+        would hold the chat's cursor, and every message after theirs, for good.
+        """
         if user_id not in self._users:
-            self._users[user_id] = to_author(self.call("users.info", user=user_id, include_locale="true")["user"])
+            try:
+                self._users[user_id] = to_author(self.call("users.info", user=user_id, include_locale="true")["user"])
+            except Refused:
+                self._users[user_id] = to_author({"id": user_id, "name": user_id})
         return self._users[user_id]
 
     def poll(

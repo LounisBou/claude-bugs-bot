@@ -435,3 +435,21 @@ def test_threads_are_read_at_most_once_a_minute_and_history_every_round(api):
     assert second.messages == [] and second.cursor[CHANNEL]["threads"] == {ts(1): ts(1), ts(2): ts(2)}
     assert [(m.text, m.thread_of) for m in third.messages] == [("oui c'est mieux", ts(1))]
     assert third.cursor[CHANNEL]["threads"][ts(1)] == ts(30) and third.cursor[CHANNEL]["threads_read"] == NOW + THREADS_EVERY
+
+
+def test_a_member_users_info_refuses_is_named_by_id_and_the_poll_goes_on(slack, api):
+    api.history[CHANNEL] = [msg(ts(1), "qui suis-je", "U0GHOST"), msg(ts(2), "encore moi", "U0GHOST"), msg(ts(3), "moi c'est Ana")]
+
+    batch = slack.poll(None, [CHANNEL], 0)
+
+    assert [(m.text, m.author.name) for m in batch.messages] == [("qui suis-je", "U0GHOST"), ("encore moi", "U0GHOST"), ("moi c'est Ana", "Ana")]
+    assert batch.messages[0].author == Author(id="U0GHOST", username="U0GHOST", name="U0GHOST", language=None, is_bot=False)
+    assert sorted(call["user"] for call in api.of("users.info")) == ["U0ANA", "U0GHOST"]  # the fallback is kept as any author
+
+
+def test_a_rate_limited_users_info_still_fails_the_poll(slack, api):
+    api.history[CHANNEL] = [msg(ts(1), "bonjour")]
+    api.statuses["users.info"] = (429, {"Retry-After": "3"})
+
+    with pytest.raises(RateLimited):
+        slack.poll(None, [CHANNEL], 0)
