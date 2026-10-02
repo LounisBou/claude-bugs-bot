@@ -452,3 +452,15 @@ def test_a_watch_on_a_slack_project_with_nothing_new_prints_nothing(tmp_path, bu
     cli.main(["pull", "--watch"], transport=Both(FakeTelegram(), FakeSlack(), rounds=3), env=env, now=NOW, sleep=_stop, clock=lambda: 0.0)
 
     assert capsys.readouterr().out == "bugs-bot: stopped\n"
+
+
+def test_a_pull_reads_slack_back_from_its_own_time_never_the_machine_s_date(bugs_home, slack_repo, env):
+    # A week before the clock of the machine running the tests: the day looked back is the round's.
+    week = 7 * 86400
+    api = FakeSlack()
+    api.history[CHANNEL] = [msg(ts(1 - week), "un bug d'il y a une semaine")]
+
+    assert cli.main(["pull"], transport=Both(FakeTelegram(), api), env=env, now=NOW - week) == 0
+
+    assert api.of("conversations.history")[0]["oldest"] == f"{NOW - week - 86400:.6f}"
+    assert len(reports_of(bugs_home, "sla")) == 1

@@ -94,7 +94,7 @@ def _pull(
     secret = None
     try:
         # Read afresh each round: a repaired .env or a new registration needs no restart.
-        channel = channel_for(kind, env, transport)
+        channel = channel_for(kind, env, transport, clock=lambda: now)  # the round's time, which tests pin
         secret = channel.secret
         cmd_pull(channel, machine, now, hold, purge, chats, quiet)
     except Exception as exc:  # noqa: BLE001 - one channel's failure must not keep the others unread

@@ -339,7 +339,7 @@ def test_replies_of_the_listed_threads_are_read_from_their_last_reply(slack, api
     assert [(r["ts"], r["oldest"]) for r in replies] == [(ts(1), ts(10)), (ts(2), ts(2))]
     assert [(m.text, m.thread_of) for m in batch.messages] == [("réponse", ts(2)), ("oui c'est mieux", ts(1))]
     # A thread no longer listed (its report closed) is dropped; each kept one moves past its last reply.
-    assert batch.cursor == {CHANNEL: {"ts": ts(2), "threads": {ts(1): ts(20), ts(2): ts(15)}}}
+    assert batch.cursor == {CHANNEL: {"ts": ts(2), "threads": {ts(1): ts(20), ts(2): ts(15)}, "threads_read": NOW}}
 
 
 def test_without_threads_given_the_known_ones_are_still_read(slack, api):
@@ -413,3 +413,25 @@ def test_any_other_refusal_of_a_thread_still_fails_the_poll(slack, api):
 
     with pytest.raises(BugsError, match="conversations.replies: channel_not_found"):
         slack.poll({CHANNEL: {"ts": ts(2), "threads": {}}}, [CHANNEL], 0, threads={CHANNEL: [ts(1)]})
+
+
+def test_threads_are_read_at_most_once_a_minute_and_history_every_round(api):
+    from bugs_bot.slack_inbound import THREADS_EVERY
+
+    at = [NOW]
+    slack = SlackChannel(SLACK_TOKEN, api, ROOT, clock=lambda: at[0])
+    api.history[CHANNEL] = [msg(ts(1), "le bug"), msg(ts(2), "un autre")]
+    listed = {CHANNEL: [ts(1), ts(2)]}
+    cursor = slack.poll({CHANNEL: {"ts": ts(0), "threads": {}}}, [CHANNEL], 0, threads=listed).cursor
+    api.replies[(CHANNEL, ts(1))] = [msg(ts(30), "oui c'est mieux", thread_ts=ts(1))]
+
+    at[0] = NOW + 10
+    second = slack.poll(cursor, [CHANNEL], 0, threads=listed)
+    at[0] = NOW + THREADS_EVERY
+    third = slack.poll(second.cursor, [CHANNEL], 0, threads=listed)
+
+    assert len(api.of("conversations.history")) == 3
+    assert [r["ts"] for r in api.of("conversations.replies")] == [ts(1), ts(2), ts(1), ts(2)]  # none in the second round
+    assert second.messages == [] and second.cursor[CHANNEL]["threads"] == {ts(1): ts(1), ts(2): ts(2)}
+    assert [(m.text, m.thread_of) for m in third.messages] == [("oui c'est mieux", ts(1))]
+    assert third.cursor[CHANNEL]["threads"][ts(1)] == ts(30) and third.cursor[CHANNEL]["threads_read"] == NOW + THREADS_EVERY

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from bugs_bot import slack, telegram
 from bugs_bot.channel import Body, Channel, Transport
@@ -15,10 +16,16 @@ HTTP_TIMEOUT = 30
 # The kinds whose platform holds a read until a message arrives and hands the bot's messages to one reader:
 # Pull long-polls them and logs the chats it drops, for ``init``. Any other kind is read again each round.
 LONG_POLL_KINDS = {"telegram"}
-# Each kind: how its token is read, and its channel built from the token, the transport and the env.
+# Each kind: how its token is read, and its channel built from the token, the transport, the env and the clock.
 _KINDS = {
-    "telegram": (telegram.read_token, lambda token, transport, env: telegram.TelegramChannel(token, transport, telegram.api_root(env))),
-    "slack": (slack.read_token, lambda token, transport, env: slack.SlackChannel(token, transport, slack.api_root(env))),
+    "telegram": (
+        telegram.read_token,
+        lambda token, transport, env, clock: telegram.TelegramChannel(token, transport, telegram.api_root(env)),
+    ),
+    "slack": (
+        slack.read_token,
+        lambda token, transport, env, clock: slack.SlackChannel(token, transport, slack.api_root(env), clock),
+    ),
 }
 KINDS = tuple(_KINDS)
 
@@ -48,13 +55,14 @@ def http_transport(
         return exc.code, Body(exc.read(), dict(exc.headers.items()) if exc.headers else {})
 
 
-def channel_for(kind: str, env: Mapping[str, str], transport: Transport) -> Channel:
+def channel_for(kind: str, env: Mapping[str, str], transport: Transport, clock: Callable[[], float] = time.time) -> Channel:
     """Return the channel of ``kind``, reading its token and API root itself.
 
     Args:
         kind: The channel kind, one of ``KINDS``.
         env: Process environment (where the token file and the API root are found).
         transport: What carries the requests; tests inject a fake.
+        clock: Epoch seconds, for a channel that reads by its own time (Slack's first look back, its threads' pace).
 
     Returns:
         The channel.
@@ -65,7 +73,7 @@ def channel_for(kind: str, env: Mapping[str, str], transport: Transport) -> Chan
     if kind not in _KINDS:
         raise BugsError(f"unknown channel: {kind}")
     read_token, build = _KINDS[kind]
-    return build(read_token(env), transport, env)
+    return build(read_token(env), transport, env, clock)
 
 
 def token_problem(kind: str, env: Mapping[str, str]) -> str | None:

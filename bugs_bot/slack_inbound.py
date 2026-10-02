@@ -1,6 +1,7 @@
 """Slack's channel history and thread replies read into the channel's normalised shape, and its cursor moved.
 
-The cursor is ``{"<chat>": {"ts": str, "threads": {"<parent ts>": "<last reply ts>"}}}``. A ``ts`` is
+The cursor is ``{"<chat>": {"ts": str, "threads": {"<parent ts>": "<last reply ts>"}, "threads_read": float}}``,
+the last key the epoch seconds the threads were last read, absent before. A ``ts`` is
 Slack's message id, « seconds.microseconds » as text: it is compared as a ``Decimal``, never as a float,
 which would merge two messages of the same second.
 """
@@ -24,6 +25,9 @@ _ESCAPES = (("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&"))
 PAGE = 200
 # The refusals of a thread whose parent message is gone (deleted): nothing will ever be read there again.
 GONE_THREAD = ("thread_not_found", "message_not_found")
+# A chat's threads are read at most this often (seconds): one ``conversations.replies`` per open report each
+# round would pass Slack's rate limit with a few of them. Its history is read every round.
+THREADS_EVERY = 60
 # A chat read for the first time is read from this far back, as Telegram keeps a bot's pending updates a day.
 FIRST_LOOK_BACK = 86400
 
@@ -133,6 +137,8 @@ def read_chat(
 ) -> tuple[list[InboundMessage], dict]:
     """Read one chat from its cursor ``state``: the messages posted since, then the replies in its threads.
 
+    The threads are read only when ``THREADS_EVERY`` seconds have passed since they last were (``now``).
+
     Returns:
         ``(messages oldest first, the chat's next cursor)``; the cursor moves past every message read,
         service messages and bots' posts included, so none is read twice.
@@ -148,7 +154,9 @@ def read_chat(
         if inbound is not None:
             found.append(inbound)
     threads = followed(state, listed)
-    for parent, last in list(threads.items()):
+    read_at = state.get("threads_read")
+    due = bool(threads) and (read_at is None or now - read_at >= THREADS_EVERY)
+    for parent, last in list(threads.items()) if due else []:
         try:
             replies = _pages(call, "conversations.replies", {"channel": chat_id, "ts": parent, "oldest": last})
         except BugsError as exc:
@@ -166,4 +174,7 @@ def read_chat(
                 found.append(inbound)
     unique = {m.message_id: m for m in found}  # a reply also sent to the channel is read twice
     ordered = sorted(unique.values(), key=lambda m: ts_key(str(m.message_id)))
-    return ordered, {"ts": top, "threads": threads}
+    moved: dict[str, Any] = {"ts": top, "threads": threads}
+    if due or read_at is not None:
+        moved["threads_read"] = now if due else read_at
+    return ordered, moved
