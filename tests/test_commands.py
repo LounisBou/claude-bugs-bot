@@ -127,3 +127,4 @@ def test_the_skill_names_both_tokens_and_sets_up_both_channels():
 
     assert "SLACK_BOT_TOKEN" in text and "TELEGRAM_BOT_TOKEN" in text
     assert "Slack" in setup and "/invite" in setup
+    assert "chat.update" in text
