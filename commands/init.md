@@ -1,6 +1,6 @@
 ---
 description: Bind this repository to its Telegram bug group and register the project
-allowed-tools: Bash(bugs-bot:*), Bash(git:*)
+allowed-tools: Bash(bugs-bot:*)
 ---
 
 Set this repository up as a bugs-bot project, or update its setup. Ask the
