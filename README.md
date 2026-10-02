@@ -12,7 +12,7 @@ on one machine.
 | Piece | What it does |
 |---|---|
 | `bugs-bot pull --watch` | The one process per machine that reads the bot's updates and files each message of a registered group into its project's inbox. Media groups are one report, a 👀 reaction acknowledges it, a message of an unregistered group is dropped and logged. Run by PM2 as `bugs-bot-pull`. |
-| `bugs-bot <command>` | The agent's and the launcher's only interface: `list`, `show`, `reply` (`--mention`, `--awaits`, `--follow-up`), `edit`, `taken`, `fixed`, `done`, `post`, `triage`, `wait`, `pending`, `overdue`, `person`, `person-note`, `handover write\|read`, `gate`, `deployed`, `agent-prompt`, `backfill-authors`. |
+| `bugs-bot <command>` | The agent's and the launcher's only interface: `list`, `show`, `reply` (`--mention`, `--awaits`, `--follow-up`), `edit`, `taken`, `fixed`, `done`, `escalated`, `post`, `triage`, `wait`, `pending`, `overdue`, `person`, `person-note`, `handover write\|read`, `gate`, `deployed`, `agent-prompt`, `backfill-authors`. |
 | `/bugs-bot:init` | Binds the repository to its Telegram group: asks a few questions, finds the group among the bot's pending updates (or in Pull's log of dropped chats), writes `.bugs-bot.json` (kept out of git through `.git/info/exclude`) and registers the project. Re-run: updates, never duplicates. |
 | `/bugs-bot:start` | Launches the project's agent in a tab right of your session, which becomes its launcher. Needs the orchestrator plugin. |
 | `/bugs-bot:remove` | Unregisters the project: Pull stops routing its group. Its data and project file are kept. |
