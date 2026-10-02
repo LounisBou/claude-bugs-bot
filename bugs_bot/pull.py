@@ -164,9 +164,10 @@ def cmd_pull(channel: Channel, machine: Machine, now: float, poll_timeout: int =
                 continue
             if report_id:
                 created.append((project, report_id, group))
-                # A new message answers what its author was asked before it (spec § 3.6).
-                first = min(group, key=lambda m: m["message_id"])
-                clear_answered(machine.project_store(project), (first.get("from") or {}).get("id"), author_of(first), first["date"])
+            # A message answers what its author was asked before it (spec § 3.6). Also when its
+            # report is already there: a batch replayed after a crash must still lift the wait.
+            first = min(group, key=lambda m: m["message_id"])
+            clear_answered(machine.project_store(project), (first.get("from") or {}).get("id"), author_of(first), first["date"])
     if not created and not failures and not poll_timeout:
         print("bugs-bot: no new report")  # a scheduled run leaves a trace in the PM2 log; a held one would flood it
     for project, report_id, group in created:

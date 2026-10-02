@@ -88,6 +88,19 @@ def test_a_later_message_of_the_same_person_answers_it(at, asked):
     assert awaiting(asked) is None
 
 
+def test_a_batch_replayed_after_a_crash_still_lifts_the_wait(at, asked, bugs_home):
+    answer = person_message(11, 101, user_id=7, name="Laura B.", date=BASE_DATE + 600, text="iPhone 12")
+    assert at(BASE_DATE + 610, "pull", transport=FakeTelegram([answer])) == 0
+    report = json.loads(asked.read_text())
+    asked.write_text(json.dumps(report | {"awaiting": {"since": "2026-10-02T08:30:00+00:00", "reply": 1}}))
+    (bugs_home / "state.json").unlink()  # the offset was never saved: the same batch comes again
+
+    assert at(BASE_DATE + 620, "pull", transport=FakeTelegram([answer])) == 0
+
+    assert awaiting(asked) is None
+    assert len(list((asked.parent.parent).iterdir())) == 2  # replayed, not duplicated
+
+
 def test_a_message_of_another_person_answers_nothing(at, asked):
     tg = FakeTelegram([person_message(11, 101, user_id=8, name="Laura", date=BASE_DATE + 600)])
 
