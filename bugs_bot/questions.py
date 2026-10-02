@@ -18,13 +18,15 @@ from bugs_bot.store import Store
 def _awaited(reports: list[tuple[str, object, dict]], key: str, exclude: str | None) -> str | None:
     """Return the first report but ``exclude`` on which the answer of the person with card ``key`` is awaited, or ``None``.
 
-    A wait counts whatever the report's status but ``done`` (« vérifier » is asked on a ``fixed`` one).
+    A wait counts whatever the report's status but ``done`` (« vérifier » is asked on a ``fixed`` one);
+    an escalated wait does not: the launcher was told, the person's next questions go on.
     """
     for report_id, _, report in reports:
         wait = report.get("awaiting")
         if (
             report_id != exclude
             and wait
+            and "escalated" not in wait
             and report["status"] != "done"
             and card_key(report.get("author_id"), report["author"]) == key
         ):

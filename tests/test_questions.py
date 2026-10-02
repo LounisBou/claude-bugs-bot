@@ -211,6 +211,29 @@ def test_fixed_keeps_the_queued_questions_of_the_report(queued, run, laura, caps
     assert f"ask {SECOND}" in wait_lines(run, capsys)
 
 
+# -- an escalated wait no longer holds the person's next questions --------------------------------
+
+
+@pytest.fixture
+def escalated(queued, run) -> None:
+    """Laura's wait on FIRST reminded, still unanswered, the launcher told."""
+    assert run("reply", FIRST, "Petite relance : quel iPhone ?", "--follow-up", now=BASE_DATE + 24 * HOUR) == 0
+    assert run("escalated", FIRST, now=BASE_DATE + 48 * HOUR) == 0
+
+
+def test_an_escalated_wait_lets_wait_print_ask(escalated, run, laura, capsys):
+    assert f"ask {SECOND}" in wait_lines(run, capsys, now=BASE_DATE + 48 * HOUR + 1)
+    assert "escalated" in report(laura, FIRST)["awaiting"]
+
+
+def test_an_escalated_wait_lets_the_next_question_be_posted(escalated, run, laura):
+    tg = FakeTelegram()
+
+    assert run("reply", SECOND, "Et le bouton Lecture ?", "--awaits", transport=tg, now=BASE_DATE + 48 * HOUR + 1) == 0
+
+    assert len(tg.sent) == 1 and card(laura)["questions"] == []
+
+
 # -- the agent sees the queue, and keeps to one question ----------------------------------------
 
 
