@@ -234,6 +234,34 @@ def test_an_escalated_wait_lets_the_next_question_be_posted(escalated, run, laur
     assert len(tg.sent) == 1 and card(laura)["questions"] == []
 
 
+# -- one queued question per report ---------------------------------------------------------------
+
+
+def test_a_second_queue_on_one_report_replaces_its_text_and_keeps_its_place(queued, run, laura):
+    write_report(laura, 7, author="Laura", author_id=7, text="un troisième sujet")
+    third = f"{STAMP}-7"
+    run("reply", third, "Ça arrive aussi en Wi-Fi ?", "--awaits", now=BASE_DATE + 20)
+
+    assert run("reply", SECOND, "Le bouton répond au deuxième appui ?", "--awaits", now=BASE_DATE + 30) == 0
+
+    assert card(laura)["questions"] == [
+        {"report": SECOND, "text": "Le bouton répond au deuxième appui ?", "queued": "2026-10-02T08:30:10+00:00"},
+        {"report": third, "text": "Ça arrive aussi en Wi-Fi ?", "queued": "2026-10-02T08:30:20+00:00"},
+    ]
+
+
+def test_asking_a_report_queued_twice_leaves_none_of_it(queued, run, laura, capsys):
+    run("reply", SECOND, "Le bouton répond au deuxième appui ?", "--awaits", now=BASE_DATE + 30)
+    laura_answers(run, at=BASE_DATE + 40)
+
+    assert run("reply", SECOND, "Et le bouton Lecture ?", "--awaits", now=BASE_DATE + 90) == 0
+
+    assert card(laura)["questions"] == []
+    run("reply", FIRST, "Merci !", now=BASE_DATE + 95)
+    laura_answers(run, at=BASE_DATE + 100)
+    assert f"ask {SECOND}" not in wait_lines(run, capsys)
+
+
 # -- a person without user id: their card, by its key -------------------------------------------
 
 

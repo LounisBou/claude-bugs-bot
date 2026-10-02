@@ -40,37 +40,41 @@ def awaited_elsewhere(store: Store, report: dict) -> str | None:
 
 
 def queue_question(store: Store, report: dict, text: str, now: float) -> None:
-    """Append a question about ``report`` to its author's queue, creating their card."""
+    """Queue a question about ``report`` on its author's card, creating it.
+
+    One question per report: one already queued about it takes the new text and keeps its date and its place.
+    """
     card = card_of(store, card_key(report.get("author_id"), report["author"]), report["author"], report.get("author_id"))
-    card.setdefault("questions", []).append(
-        {"report": report["id"], "text": text, "queued": datetime.fromtimestamp(now, timezone.utc).isoformat()}
-    )
+    questions = card.setdefault("questions", [])
+    for question in questions:
+        if question["report"] == report["id"]:
+            question["text"] = text
+            break
+    else:
+        questions.append({"report": report["id"], "text": text, "queued": datetime.fromtimestamp(now, timezone.utc).isoformat()})
     save_person(store, card)
 
 
-def _remove(store: Store, report: dict, every: bool) -> None:
+def _remove(store: Store, report: dict) -> bool:
+    """Take the question queued about ``report`` off its author's card; tell whether there was one."""
     card = load_person(store, card_key(report.get("author_id"), report["author"]))
-    if not card or not card.get("questions"):
-        return
-    kept, removed = [], False
-    for question in card["questions"]:
-        if question["report"] == report["id"] and (every or not removed):
-            removed = True
-            continue
-        kept.append(question)
-    if removed:
-        card["questions"] = kept
-        save_person(store, card)
+    questions = (card or {}).get("questions", [])
+    kept = [question for question in questions if question["report"] != report["id"]]
+    if len(kept) == len(questions):
+        return False
+    card["questions"] = kept
+    save_person(store, card)
+    return True
 
 
 def asked(store: Store, report: dict) -> None:
-    """Take the oldest queued question about ``report`` off its author's queue: it has just been asked."""
-    _remove(store, report, every=False)
+    """Take the question queued about ``report`` off its author's queue: it has just been asked."""
+    _remove(store, report)
 
 
 def drop_closed(store: Store, report: dict) -> None:
-    """Drop every queued question about ``report``: it is done, there is nothing left to ask."""
-    _remove(store, report, every=True)
+    """Drop the question queued about ``report``: it is done, there is nothing left to ask."""
+    _remove(store, report)
 
 
 def asks(store: Store) -> list[str]:
