@@ -81,7 +81,7 @@ Telegram's held request is cut to 10 s, so both are read in the same process. HT
 | What | Where |
 |---|---|
 | Project file | `<repository>/.bugs-bot.json`, local, never versioned |
-| Registry | `~/.bugs-bot/projects.json` (chat id → project, repository) |
+| Registry | `~/.bugs-bot/projects.json` (`<channel>:<chat id>` → project, repository) |
 | Machine state | `~/.bugs-bot/state.json` (the update offset), `unregistered.json` |
 | A project's data | `~/.bugs-bot/<project>/` — `inbox/`, `people/`, `state.json`, `handover.md` |
 | Token | `~/.bugs-bot/.env` |
