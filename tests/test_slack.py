@@ -7,8 +7,8 @@ import json
 import pytest
 from fake_slack import CHANNEL, ROOT, SLACK_TOKEN, FakeSlack, msg, ts, user
 
-from bugs_bot.channel import Attachment, Author, Body, mask
-from bugs_bot.channels import channel_for, token_problem
+from bugs_bot.channel import Attachment, Author, Body
+from bugs_bot.channels import channel_for, mask, token_problem
 from bugs_bot.errors import BugsError, RateLimited
 from bugs_bot.slack import GONE, SlackChannel
 
@@ -339,7 +339,7 @@ def test_replies_of_the_listed_threads_are_read_from_their_last_reply(slack, api
     assert [(r["ts"], r["oldest"]) for r in replies] == [(ts(1), ts(10)), (ts(2), ts(2))]
     assert [(m.text, m.thread_of) for m in batch.messages] == [("réponse", ts(2)), ("oui c'est mieux", ts(1))]
     # A thread no longer listed (its report closed) is dropped; each kept one moves past its last reply.
-    assert batch.cursor == {CHANNEL: {"ts": ts(2), "threads": {ts(1): ts(20), ts(2): ts(15)}}}
+    assert batch.cursor == {CHANNEL: {"ts": ts(2), "threads": {ts(1): ts(20), ts(2): ts(15)}, "threads_read": NOW}}
 
 
 def test_without_threads_given_the_known_ones_are_still_read(slack, api):
@@ -394,3 +394,145 @@ def test_a_poll_of_no_chat_lists_the_channels_the_bot_is_in(slack, api):
     }
     assert batch.messages == [] and batch.cursor == {}
     assert api.of("users.conversations")[0] == {"types": "public_channel,private_channel", "exclude_archived": "true", "limit": "200"}
+
+
+@pytest.mark.parametrize("error", ["thread_not_found", "message_not_found"])
+def test_a_thread_whose_parent_is_gone_is_dropped_and_the_poll_goes_on(slack, api, error):
+    api.history[CHANNEL] = [msg(ts(5), "nouveau")]
+    api.answers["conversations.replies"] = {"ok": False, "error": error}
+    cursor = {CHANNEL: {"ts": ts(2), "threads": {ts(1): ts(3)}}}
+
+    batch = slack.poll(cursor, [CHANNEL], 0, threads={CHANNEL: [ts(1)]})
+
+    assert [m.text for m in batch.messages] == ["nouveau"]
+    assert batch.cursor[CHANNEL]["ts"] == ts(5) and ts(1) not in batch.cursor[CHANNEL]["threads"]
+
+
+def test_any_other_refusal_of_a_thread_still_fails_the_poll(slack, api):
+    api.answers["conversations.replies"] = {"ok": False, "error": "channel_not_found"}
+
+    with pytest.raises(BugsError, match="conversations.replies: channel_not_found"):
+        slack.poll({CHANNEL: {"ts": ts(2), "threads": {}}}, [CHANNEL], 0, threads={CHANNEL: [ts(1)]})
+
+
+def test_threads_are_read_at_most_once_a_minute_and_history_every_round(api):
+    from bugs_bot.slack_inbound import THREADS_EVERY
+
+    at = [NOW]
+    slack = SlackChannel(SLACK_TOKEN, api, ROOT, clock=lambda: at[0])
+    api.history[CHANNEL] = [msg(ts(1), "le bug"), msg(ts(2), "un autre")]
+    listed = {CHANNEL: [ts(1), ts(2)]}
+    cursor = slack.poll({CHANNEL: {"ts": ts(0), "threads": {}}}, [CHANNEL], 0, threads=listed).cursor
+    api.replies[(CHANNEL, ts(1))] = [msg(ts(30), "oui c'est mieux", thread_ts=ts(1))]
+
+    at[0] = NOW + 10
+    second = slack.poll(cursor, [CHANNEL], 0, threads=listed)
+    at[0] = NOW + THREADS_EVERY
+    third = slack.poll(second.cursor, [CHANNEL], 0, threads=listed)
+
+    assert len(api.of("conversations.history")) == 3
+    assert [r["ts"] for r in api.of("conversations.replies")] == [ts(1), ts(2), ts(1), ts(2)]  # none in the second round
+    assert second.messages == [] and second.cursor[CHANNEL]["threads"] == {ts(1): ts(1), ts(2): ts(2)}
+    assert [(m.text, m.thread_of) for m in third.messages] == [("oui c'est mieux", ts(1))]
+    assert third.cursor[CHANNEL]["threads"][ts(1)] == ts(30) and third.cursor[CHANNEL]["threads_read"] == NOW + THREADS_EVERY
+
+
+def test_a_member_users_info_refuses_is_named_by_id_and_the_poll_goes_on(slack, api):
+    api.history[CHANNEL] = [msg(ts(1), "qui suis-je", "U0GHOST"), msg(ts(2), "encore moi", "U0GHOST"), msg(ts(3), "moi c'est Ana")]
+
+    batch = slack.poll(None, [CHANNEL], 0)
+
+    assert [(m.text, m.author.name) for m in batch.messages] == [("qui suis-je", "U0GHOST"), ("encore moi", "U0GHOST"), ("moi c'est Ana", "Ana")]
+    assert batch.messages[0].author == Author(id="U0GHOST", username="U0GHOST", name="U0GHOST", language=None, is_bot=False)
+    assert sorted(call["user"] for call in api.of("users.info")) == ["U0ANA", "U0GHOST"]  # the fallback is kept as any author
+
+
+def test_a_rate_limited_users_info_still_fails_the_poll(slack, api):
+    api.history[CHANNEL] = [msg(ts(1), "bonjour")]
+    api.statuses["users.info"] = (429, {"Retry-After": "3"})
+
+    with pytest.raises(RateLimited):
+        slack.poll(None, [CHANNEL], 0)
+
+
+# -- redirects ------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def redirecting():
+    """A loopback server answering 302 to ``/file``, toward ``/elsewhere``; every path asked recorded."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    asked: list[tuple[str, str | None]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - http.server's name
+            asked.append((self.path, self.headers.get("Authorization")))
+            if self.path == "/file":
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{self.server.server_port}/elsewhere")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"landed")
+
+        def log_message(self, *_):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_port}", asked
+    server.shutdown()
+    server.server_close()
+    thread.join()
+
+
+def test_the_transport_follows_no_redirect_with_a_credential_in_the_headers(redirecting):
+    from bugs_bot.channels import http_transport
+
+    root, asked = redirecting
+
+    status, _ = http_transport(f"{root}/file", None, None, AUTH)
+
+    assert status == 302 and asked == [("/file", f"Bearer {SLACK_TOKEN}")]
+
+
+def test_the_transport_still_follows_a_redirect_of_a_request_without_one(redirecting):
+    from bugs_bot.channels import http_transport
+
+    root, asked = redirecting
+
+    assert http_transport(f"{root}/file") == (200, b"landed") and [path for path, _ in asked] == ["/file", "/elsewhere"]
+
+
+def test_a_redirected_download_is_an_error_without_the_token(redirecting):
+    from bugs_bot.channels import http_transport
+
+    root, asked = redirecting
+    slack = SlackChannel(SLACK_TOKEN, http_transport, root)
+
+    with pytest.raises(BugsError) as caught:
+        slack.get_file(f"{root}/file")
+
+    assert "download of a Slack file: HTTP 302" in str(caught.value) and SLACK_TOKEN not in str(caught.value)
+    assert [path for path, _ in asked] == ["/file"]
+
+
+def test_a_redirect_answered_by_the_transport_is_never_followed_by_the_channel(api):
+    calls = []
+
+    def transport(url, payload=None, timeout=None, headers=None):
+        calls.append(url)
+        return 302, Body(b"", {"Location": "https://elsewhere.example/x"})
+
+    slack = SlackChannel(SLACK_TOKEN, transport, ROOT)
+    with pytest.raises(BugsError) as caught:
+        slack.get_file("https://files.slack.com/F1/a.png")
+
+    assert calls == ["https://files.slack.com/F1/a.png"] and SLACK_TOKEN not in str(caught.value)
+    with pytest.raises(BugsError, match=r"^chat\.postMessage: HTTP 302") as posted:
+        slack.send(CHANNEL, "x")
+    assert SLACK_TOKEN not in str(posted.value)

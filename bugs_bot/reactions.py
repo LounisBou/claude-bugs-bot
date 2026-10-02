@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import sys
 
-from bugs_bot.channel import Channel, ChatId, mask
+from bugs_bot.channel import Channel, ChatId
+from bugs_bot.channels import mask
 from bugs_bot.errors import BugsError
 from bugs_bot.store import Store, update_report
 

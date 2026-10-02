@@ -14,8 +14,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from bugs_bot.channel import Transport, mask
-from bugs_bot.channels import channel_for, token_problem
+from bugs_bot.channel import Transport
+from bugs_bot.channels import channel_for, mask, token_problem
 from bugs_bot.errors import BugsError
 from bugs_bot.project import DEFAULT_CHANNEL
 from bugs_bot.store import Machine, bugs_home

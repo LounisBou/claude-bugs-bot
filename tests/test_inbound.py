@@ -12,7 +12,8 @@ from fake_channel import batch as fake_batch
 from samples import BASE_DATE, GROUP_ID, OTHER_GROUP_ID, TOKEN, FakeTelegram, message
 
 from bugs_bot import people, pull
-from bugs_bot.channel import Attachment, Author, Batch, InboundMessage, mask
+from bugs_bot.channel import Attachment, Author, Batch, InboundMessage
+from bugs_bot.channels import mask
 from bugs_bot.channels import channel_for, token_problem
 from bugs_bot.errors import BugsError
 from bugs_bot.init import discover_groups
