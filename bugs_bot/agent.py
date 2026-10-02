@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from bugs_bot.errors import BugsError
+from bugs_bot.followup import due, is_due, is_unanswered, unanswered
 from bugs_bot.project import Project
 from bugs_bot.reports import one_line
 from bugs_bot.store import OPEN_STATUSES, Store, load_report, write_json
@@ -42,15 +43,28 @@ def untriaged(store: Store) -> list[str]:
     return [rid for rid, _, rep in store.reports() if rep["status"] in OPEN_STATUSES and not rep.get("kind")]
 
 
-def cmd_wait(store: Store, timeout: float, interval: float, sleep: Callable[[float], None], clock: Callable[[], float]) -> None:
-    """Block until an untriaged open report is in the inbox, then print the ids.
+def cmd_wait(
+    store: Store,
+    timeout: float,
+    interval: float,
+    sleep: Callable[[float], None],
+    clock: Callable[[], float],
+    now: float,
+    follow_up_hours: float,
+) -> None:
+    """Block until there is something to do, then print it: the untriaged open reports' ids, then
+    ``follow-up <id>`` for each wait owed its reminder and ``unanswered <id>`` for each to tell the launcher.
 
-    Reads the inbox only (the PM2 pull fills it). Prints nothing when ``timeout``
-    elapses first, so the caller re-arms it.
+    Reads the inbox only (the PM2 pull fills it). Prints nothing when ``timeout`` elapses first,
+    so the caller re-arms it. ``now`` is the wall time at the start; it advances with ``clock``.
     """
-    deadline = clock() + timeout
+    start = clock()
+    deadline = start + timeout
     while True:
+        at = now + clock() - start
         found = untriaged(store)
+        found += [f"follow-up {rid}" for rid in due(store, follow_up_hours, at)]
+        found += [f"unanswered {rid}" for rid in unanswered(store, follow_up_hours, at)]
         if found:
             print("\n".join(found))
             return
@@ -60,12 +74,33 @@ def cmd_wait(store: Store, timeout: float, interval: float, sleep: Callable[[flo
         sleep(min(interval, left))
 
 
-def cmd_pending(store: Store) -> None:
-    """List the triaged reports neither fixed nor done: what to ask the launcher about after a restart."""
+def overdue_lines(store: Store, hours: float, now: float) -> list[str]:
+    """Return one line per wait owed its reminder (``follow-up``) or unanswered after it (``unanswered``)."""
+    lines = []
+    for report_id, _, report in store.reports():
+        kind = "follow-up" if is_due(report, hours, now) else "unanswered" if is_unanswered(report, hours, now) else None
+        if kind is None:
+            continue
+        wait, replies = report["awaiting"], report["replies"]
+        asked = replies[wait["reply"] - 1]["text"] if 0 < wait["reply"] <= len(replies) else ""
+        lines.append(f"{kind} {report_id}  {report['author']}  since {wait['since'][:16]}  {one_line(asked)}")
+    return lines
+
+
+def cmd_overdue(store: Store, hours: float, now: float) -> None:
+    """Print the follow-ups due and the waits still unanswered after their reminder, one line each."""
+    for line in overdue_lines(store, hours, now):
+        print(line)
+
+
+def cmd_pending(store: Store, follow_up_hours: float, now: float) -> None:
+    """List the triaged reports neither fixed nor done, then the overdue waits: what to take up after a restart."""
     for report_id, _, report in store.reports():
         if report["status"] not in OPEN_STATUSES or not report.get("kind"):
             continue
         print(f"{report_id}  {report['kind']:<8}  {report['status']:<5}  {report['author']}  {one_line(report['text'])}")
+    for line in overdue_lines(store, follow_up_hours, now):
+        print(line)
 
 
 def _quoted(value: object) -> str:

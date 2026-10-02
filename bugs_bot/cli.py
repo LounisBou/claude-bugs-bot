@@ -2,9 +2,9 @@
 
 Machine-wide: ``pull [--every S | --watch]``. Per project (``--project <p>``, else the project whose
 ``.bugs-bot.json`` is in the current directory or a parent): ``list``, ``show <id>``,
-``reply <id> "<text>" [--mention]``, ``edit <id> "<text>" [--reply N] [--mention]``, ``taken <id>``,
+``reply <id> "<text>" [--mention] [--awaits | --follow-up]``, ``edit <id> "<text>" [--reply N] [--mention] [--awaits]``, ``taken <id>``,
 ``fixed <id>``, ``done <id>``; and for the project's agent session: ``wait``, ``triage <id> bug|question``,
-``pending``, ``post "<text>" [--mention <id>]``, ``backfill-authors``, ``person <ref>``,
+``pending``, ``overdue``, ``escalated <id>``, ``post "<text>" [--mention <id>]``, ``backfill-authors``, ``person <ref>``,
 ``person-note <ref> "<text>"``, ``agent-prompt --launcher "<name [ref]>" [--predecessor … --predecessor-tty …]``,
 ``gate [--set N] [--measure]``, ``deployed <commit>``, ``handover write "<text>" | read``. Python 3 standard library only.
 
@@ -23,10 +23,11 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from bugs_bot import parser
-from bugs_bot.agent import cmd_agent_prompt, cmd_deployed, cmd_pending, cmd_triage, cmd_wait
+from bugs_bot.agent import cmd_agent_prompt, cmd_deployed, cmd_overdue, cmd_pending, cmd_triage, cmd_wait
 from bugs_bot.channel import Transport
 from bugs_bot.doctor import cmd_doctor, pull_processes
 from bugs_bot.errors import BugsError
+from bugs_bot.followup import cmd_escalated
 from bugs_bot.gate import cmd_gate
 from bugs_bot.handover import read_note, write_note
 from bugs_bot.init import InitArgs, cmd_init, cmd_remove, repo_root
@@ -162,9 +163,13 @@ def main(
         elif args.command == "triage":
             cmd_triage(store, args.id, args.kind)
         elif args.command == "wait":
-            cmd_wait(store, args.timeout, args.interval, sleep, clock)
+            cmd_wait(store, args.timeout, args.interval, sleep, clock, now, project.follow_up_hours)
         elif args.command == "pending":
-            cmd_pending(store)
+            cmd_pending(store, project.follow_up_hours, now)
+        elif args.command == "overdue":
+            cmd_overdue(store, project.follow_up_hours, now)
+        elif args.command == "escalated":
+            cmd_escalated(store, args.id, now)
         elif args.command == "agent-prompt":
             print(cmd_agent_prompt(store, project, args.launcher, now, args.predecessor, args.predecessor_tty))
         elif args.command == "deployed":
@@ -186,9 +191,10 @@ def main(
             elif args.command == "done":
                 cmd_done(channel, store, chat_id, args.id, args.reason, now)
             elif args.command == "reply":
-                cmd_reply(channel, store, chat_id, args.id, args.text, now, args.mention)
+                follow_up = project.follow_up_hours if args.follow_up else None
+                cmd_reply(channel, store, chat_id, args.id, args.text, now, args.mention, args.awaits, follow_up)
             elif args.command == "edit":
-                cmd_edit(channel, store, chat_id, args.id, args.text, now, args.reply, args.mention)
+                cmd_edit(channel, store, chat_id, args.id, args.text, now, args.reply, args.mention, args.awaits)
             elif args.command == "post":
                 cmd_post(channel, store, chat_id, args.text, now, args.mention)
             elif args.command == "backfill-authors":
