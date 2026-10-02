@@ -4,7 +4,7 @@ Machine-wide: ``pull [--every S | --watch]``. Per project (``--project <p>``, el
 ``.bugs-bot.json`` is in the current directory or a parent): ``list``, ``show <id>``,
 ``reply <id> "<text>" [--mention] [--awaits | --follow-up]``, ``edit <id> "<text>" [--reply N] [--mention] [--awaits]``, ``delete <id> [--reply N]``, ``taken <id>``,
 ``fixed <id>``, ``done <id>``; and for the project's agent session: ``wait``, ``triage <id> bug|question``,
-``pending``, ``overdue``, ``escalated <id>``, ``post "<text>" [--mention <id>]``, ``backfill-authors``, ``person <ref>``,
+``pending``, ``overdue``, ``escalated <id>``, ``unask <id>``, ``post "<text>" [--mention <id>]``, ``backfill-authors``, ``person <ref>``,
 ``person-note <ref> "<text>"``, ``person-lang <ref> <code>``, ``agent-prompt --launcher "<name [ref]>" [--predecessor … --predecessor-tty …]``,
 ``gate [--set N] [--measure]``, ``deployed <commit>``, ``handover write "<text>" | read``. Python 3 standard library only.
 
@@ -34,6 +34,7 @@ from bugs_bot.handover import last_archive, read_note, write_note
 from bugs_bot.init import InitArgs, cmd_init, cmd_remove, init_kind, repo_root
 from bugs_bot.people import cmd_backfill_authors, cmd_person, cmd_person_lang, cmd_person_note
 from bugs_bot.project import find_project_file, load_project, resolve_project
+from bugs_bot.questions import cmd_unask
 from bugs_bot.reports import (
     cmd_delete,
     cmd_done,
@@ -170,6 +171,8 @@ def main(
             cmd_overdue(store, project.follow_up_hours, now)
         elif args.command == "escalated":
             cmd_escalated(store, args.id, now)
+        elif args.command == "unask":
+            cmd_unask(store, args.id)
         elif args.command == "agent-prompt":
             print(cmd_agent_prompt(store, project, args.launcher, now, args.predecessor, args.predecessor_tty))
         elif args.command == "deployed":

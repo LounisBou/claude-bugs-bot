@@ -90,9 +90,9 @@ def test_two_people_never_block_each_other(run, laura):
     assert len(tg.sent) == 1 and "awaiting" in report(laura, MATHIS)
 
 
-def test_a_wait_on_a_closed_report_blocks_nothing(run, laura):
+def test_a_wait_on_a_done_report_blocks_nothing(run, laura):
     run("reply", FIRST, "Tu peux vérifier ?", "--awaits", now=BASE_DATE)
-    run("fixed", FIRST, now=BASE_DATE + 5)
+    run("done", FIRST, now=BASE_DATE + 5)
     tg = FakeTelegram()
 
     assert run("reply", SECOND, "Il répond au deuxième appui ?", "--awaits", transport=tg, now=BASE_DATE + 10) == 0
@@ -151,9 +151,8 @@ def test_a_reminder_is_the_question_in_flight_not_a_new_one(queued, run, laura):
 # -- a subject closed meanwhile ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize("close", [("done", SECOND), ("fixed", SECOND)])
-def test_a_queued_question_on_a_report_closed_meanwhile_is_dropped(queued, run, laura, capsys, close):
-    run(*close, now=BASE_DATE + 30)
+def test_a_queued_question_on_a_report_done_meanwhile_is_dropped(queued, run, laura, capsys):
+    run("done", SECOND, now=BASE_DATE + 30)
     laura_answers(run)
 
     assert card(laura)["questions"] == []
@@ -169,6 +168,157 @@ def test_a_queued_question_on_a_report_gone_from_disk_is_not_asked(queued, run, 
     assert not any(line.startswith("ask ") for line in wait_lines(run, capsys))
 
 
+# -- a wait on a fixed report: « vérifier » is a question like any other ----------------------
+
+
+@pytest.fixture
+def verify(run, laura) -> Path:
+    """FIRST is fixed, then Laura is asked to verify it at BASE_DATE."""
+    assert run("fixed", FIRST, now=BASE_DATE - 60) == 0
+    assert run("reply", FIRST, "Tu peux vérifier ?", "--awaits", now=BASE_DATE) == 0
+    return laura
+
+
+def test_a_wait_on_a_fixed_report_queues_the_next_question(verify, run, capsys):
+    tg = FakeTelegram()
+
+    assert run("reply", SECOND, "Il répond au deuxième appui ?", "--awaits", transport=tg, now=BASE_DATE + 10) == 0
+
+    assert tg.sent == [] and [q["report"] for q in card(verify)["questions"]] == [SECOND]
+    assert f"ask {SECOND}" not in wait_lines(run, capsys)
+
+
+def test_their_answer_on_a_fixed_report_makes_wait_print_ask(verify, run, capsys):
+    run("reply", SECOND, "Il répond au deuxième appui ?", "--awaits", now=BASE_DATE + 10)
+    laura_answers(run)
+
+    assert f"ask {SECOND}" in wait_lines(run, capsys)
+
+
+def test_a_wait_on_a_fixed_report_is_reminded_once_due(verify, run, capsys):
+    assert f"follow-up {FIRST}" not in wait_lines(run, capsys, now=BASE_DATE + 24 * HOUR - 1)
+
+    assert f"follow-up {FIRST}" in wait_lines(run, capsys, now=BASE_DATE + 24 * HOUR)
+    assert run("reply", FIRST, "Petite relance : tu as pu vérifier ?", "--follow-up", now=BASE_DATE + 24 * HOUR) == 0
+    assert f"unanswered {FIRST}" in wait_lines(run, capsys, now=BASE_DATE + 48 * HOUR)
+
+
+def test_fixed_keeps_the_queued_questions_of_the_report(queued, run, laura, capsys):
+    run("fixed", SECOND, now=BASE_DATE + 30)
+    laura_answers(run)
+
+    assert [q["report"] for q in card(laura)["questions"]] == [SECOND]
+    assert f"ask {SECOND}" in wait_lines(run, capsys)
+
+
+# -- an escalated wait no longer holds the person's next questions --------------------------------
+
+
+@pytest.fixture
+def escalated(queued, run) -> None:
+    """Laura's wait on FIRST reminded, still unanswered, the launcher told."""
+    assert run("reply", FIRST, "Petite relance : quel iPhone ?", "--follow-up", now=BASE_DATE + 24 * HOUR) == 0
+    assert run("escalated", FIRST, now=BASE_DATE + 48 * HOUR) == 0
+
+
+def test_an_escalated_wait_lets_wait_print_ask(escalated, run, laura, capsys):
+    assert f"ask {SECOND}" in wait_lines(run, capsys, now=BASE_DATE + 48 * HOUR + 1)
+    assert "escalated" in report(laura, FIRST)["awaiting"]
+
+
+def test_an_escalated_wait_lets_the_next_question_be_posted(escalated, run, laura):
+    tg = FakeTelegram()
+
+    assert run("reply", SECOND, "Et le bouton Lecture ?", "--awaits", transport=tg, now=BASE_DATE + 48 * HOUR + 1) == 0
+
+    assert len(tg.sent) == 1 and card(laura)["questions"] == []
+
+
+# -- one queued question per report ---------------------------------------------------------------
+
+
+def test_a_second_queue_on_one_report_replaces_its_text_and_keeps_its_place(queued, run, laura):
+    write_report(laura, 7, author="Laura", author_id=7, text="un troisième sujet")
+    third = f"{STAMP}-7"
+    run("reply", third, "Ça arrive aussi en Wi-Fi ?", "--awaits", now=BASE_DATE + 20)
+
+    assert run("reply", SECOND, "Le bouton répond au deuxième appui ?", "--awaits", now=BASE_DATE + 30) == 0
+
+    assert card(laura)["questions"] == [
+        {"report": SECOND, "text": "Le bouton répond au deuxième appui ?", "queued": "2026-10-02T08:30:10+00:00"},
+        {"report": third, "text": "Ça arrive aussi en Wi-Fi ?", "queued": "2026-10-02T08:30:20+00:00"},
+    ]
+
+
+def test_asking_a_report_queued_twice_leaves_none_of_it(queued, run, laura, capsys):
+    run("reply", SECOND, "Le bouton répond au deuxième appui ?", "--awaits", now=BASE_DATE + 30)
+    laura_answers(run, at=BASE_DATE + 40)
+
+    assert run("reply", SECOND, "Et le bouton Lecture ?", "--awaits", now=BASE_DATE + 90) == 0
+
+    assert card(laura)["questions"] == []
+    run("reply", FIRST, "Merci !", now=BASE_DATE + 95)
+    laura_answers(run, at=BASE_DATE + 100)
+    assert f"ask {SECOND}" not in wait_lines(run, capsys)
+
+
+# -- a person without user id: their card, by its key -------------------------------------------
+
+
+@pytest.fixture
+def nameless(run, bound) -> Path:
+    """Two reports of « Laura Martin », no user id recorded; asked about the first, the second queued; card name lost."""
+    write_report(bound, 5, author="Laura Martin", text="la liste saute")
+    write_report(bound, 6, author="Laura Martin", text="le bouton Lecture ne répond pas")
+    assert run("reply", FIRST, "Tu es sur quel iPhone ?", "--awaits", now=BASE_DATE) == 0
+    assert run("reply", SECOND, "Il répond au deuxième appui ?", "--awaits", now=BASE_DATE + 10) == 0
+    path = bound / "people" / "name-laura-martin.json"
+    path.write_text(json.dumps(json.loads(path.read_text()) | {"name": None}))
+    return bound
+
+
+def test_a_person_without_user_id_is_not_asked_while_they_owe_an_answer(nameless, run, capsys):
+    assert f"ask {SECOND}" not in wait_lines(run, capsys)
+
+
+def test_the_guard_holds_for_a_person_without_user_id(nameless, run):
+    tg = FakeTelegram()
+
+    assert run("reply", SECOND, "Le bouton répond ?", "--awaits", transport=tg, now=BASE_DATE + 20) == 0
+
+    assert tg.sent == []
+
+
+def test_a_person_without_user_id_is_asked_once_free(nameless, run, capsys):
+    tg = FakeTelegram([person_message(10, 100, user_id=70, name="Laura Martin", date=int(BASE_DATE + 60), text="iPhone SE")])
+    assert run("pull", transport=tg, now=BASE_DATE + 61) == 0
+
+    assert wait_lines(run, capsys).count(f"ask {SECOND}") == 1
+
+
+# -- a queued question the agent judges moot -----------------------------------------------------
+
+
+def test_unask_drops_the_queued_question_and_wait_no_longer_asks_it(queued, run, laura, capsys):
+    capsys.readouterr()
+
+    assert run("unask", SECOND) == 0
+
+    assert capsys.readouterr().out == f"unasked {SECOND}\n"
+    assert card(laura)["questions"] == []
+    laura_answers(run)
+    assert not any(line.startswith("ask ") for line in wait_lines(run, capsys))
+
+
+def test_unask_is_refused_when_nothing_is_queued(queued, run, laura, capsys):
+    capsys.readouterr()
+
+    assert run("unask", FIRST) == 1
+
+    assert capsys.readouterr().err == f"bugs-bot: no question queued about {FIRST}\n"
+    assert [q["report"] for q in card(laura)["questions"]] == [SECOND]
+
+
 # -- the agent sees the queue, and keeps to one question ----------------------------------------
 
 
@@ -181,8 +331,10 @@ def test_person_shows_the_queued_questions(queued, run, capsys):
 
 
 @pytest.mark.parametrize("phrase", [
-    "One question per message, one subject per person at a time",
+    "One message carries one question, in its own sentence",
+    "One subject per person at a time.",
     "`ask <id>`",
+    "A queued question that no longer needs asking (the subject moved on): `unask <id>`.",
     "queued <id>: <author> already awaits <other id>",
     "Their other subjects are worked on in parallel without asking",
 ])

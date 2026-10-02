@@ -98,7 +98,7 @@ def cmd_reply(
     """Answer in the group, threaded on the report's first message; ``tag`` mentions its author.
 
     ``awaits`` records that the reply waits for the person's answer — unless their answer is already
-    awaited on another open report: one question at a time (spec § 3.5), so nothing is posted and
+    awaited on another report not done: one question at a time (spec § 3.5), so nothing is posted and
     the question is queued on their card, for ``wait`` to hand back (``ask <id>``) once they answer.
     ``follow_up_hours`` makes it the one reminder of a wait that old (refused before anything is
     sent when none is due).
@@ -188,20 +188,28 @@ def cmd_delete(
     """Delete a reply the bot posted on a report: the last one, or the ``number``-th (1-based, as ``show`` numbers them).
 
     The reply stays in ``report.json``, marked ``deleted`` with the date: the record of what was said is
-    kept. A wait that pointed at it is lifted: a deleted question awaits no answer.
+    kept. A wait that pointed at it is lifted: a deleted question awaits no answer. A message the
+    group no longer has (« message to delete not found ») is marked the same, and said so.
 
     Raises:
-        BugsError: On no such reply, a reply without ``message_id`` or already deleted, or a channel error
-            (then nothing is marked).
+        BugsError: On no such reply, a reply without ``message_id`` or already deleted, or another channel
+            error (then nothing is marked).
     """
     path, report = load_report(store, report_id)
     number, reply = posted_reply(report, number, "deleted")
-    channel.delete(report.get("chat_id", chat_id), reply["message_id"])
+    gone = ""
+    try:
+        channel.delete(report.get("chat_id", chat_id), reply["message_id"])
+    except BugsError as exc:
+        # Deleted already (by an admin, or a delete whose answer was lost): the outcome is the one wanted.
+        if "message to delete not found" not in str(exc):
+            raise
+        gone = " (already gone from the group)"
     reply["deleted"] = datetime.fromtimestamp(now, timezone.utc).isoformat()
     if (report.get("awaiting") or {}).get("reply") == number:
         del report["awaiting"]
     write_json(path / "report.json", report)
-    print(f"deleted reply {number} of {report_id}")
+    print(f"deleted reply {number} of {report_id}{gone}")
 
 
 def cmd_taken(channel: Channel, store: Store, chat_id: ChatId, report_id: str) -> int:
@@ -235,7 +243,6 @@ def cmd_fixed(channel: Channel, store: Store, chat_id: ChatId, report_id: str, n
     if note:
         report["fix_ref"] = note
         write_json(path / "report.json", report)
-    drop_closed(store, report)
     print(f"fixed {report_id}")
     return say_reaction_pending(channel, failure)
 
