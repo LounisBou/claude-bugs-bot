@@ -10,7 +10,7 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PY=${E2E_PYTHON:-python3}
 TOKEN="123456789:AAFakeTokenFakeTokenFakeTokenFake123"
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/bugs-bot-e2e.XXXXXX")
+WORK=""
 SERVER_PID=""
 
 # Runs on every way out: success, a failed command under `set -e`, a failed check, a signal.
@@ -21,13 +21,15 @@ cleanup() {
         kill "$SERVER_PID" 2>/dev/null || true
         wait "$SERVER_PID" 2>/dev/null || true
     fi
-    rm -rf "$WORK"
+    [ -z "$WORK" ] || rm -rf "$WORK"
     exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
+
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/bugs-bot-e2e.XXXXXX")
 
 fail() {
     echo "E2E FAIL: $*" >&2
