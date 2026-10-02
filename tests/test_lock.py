@@ -367,6 +367,10 @@ class LockProbe(FakeChannel):
         self._free("delete")
         return super().delete(*args, **kw)
 
+    def delete_file(self, *args, **kw):
+        self._free("delete_file")
+        return super().delete_file(*args, **kw)
+
     def react(self, *args, **kw):
         self._free("react")
         return super().react(*args, **kw)

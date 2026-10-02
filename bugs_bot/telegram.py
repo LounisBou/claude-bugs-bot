@@ -8,7 +8,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from bugs_bot.channel import Author, Batch, ChatId, ImagesNotSent, Mention, MessageId, Transport, Upload, checked_root, multipart
+from bugs_bot.channel import (
+    Author, Batch, ChatId, ImagesNotSent, Mention, MessageId, SentImages, Transport, Upload, checked_root, multipart,
+)
 from bugs_bot.errors import BugsError
 from bugs_bot.envfile import read_secret
 from bugs_bot.images import wire_file
@@ -175,13 +177,13 @@ class TelegramChannel:
 
     def send_images(
         self, chat_id: ChatId, text: str, paths: list[Path], reply_to: MessageId | None = None, mention: Mention | None = None
-    ) -> list[dict]:
+    ) -> SentImages:
         """Post images with ``text``: ``sendPhoto`` for one, ``sendMediaGroup`` for several (the caption on the first).
 
         A caption longer than ``CAPTION_MAX`` is posted first as a message, the images after it on the same thread.
 
         Raises:
-            ImagesNotSent: The text went out first and the images failed.
+            ImagesNotSent: The text went out first and the images failed, refused or never answered.
             BugsError: Nothing was posted.
         """
         files = [wire_file(path, rank) for rank, path in enumerate(paths, 1)]  # read before anything goes out
@@ -204,11 +206,12 @@ class TelegramChannel:
                 media[0] |= {"caption_entities": entities} if entities else {}
                 fields["media"] = json.dumps(media, ensure_ascii=False)
                 sent = self._api.call("sendMediaGroup", form=multipart(fields, [(f"image{rank}", *file) for rank, file in enumerate(files, 1)]))
-        except BugsError as exc:
+        except (BugsError, OSError) as exc:  # OSError: the request failed on its way (timeout, reset, unreachable)
             if posted:
                 raise ImagesNotSent(f"the text was posted alone, not the images: {exc}", posted[0]) from None
             raise
-        return posted + [{"message_id": message["message_id"], "text": caption if not rank else ""} for rank, message in enumerate(sent)]
+        message_ids = [message["message_id"] for message in posted + sent]
+        return SentImages(posted[0]["text"] if posted else caption, message_ids, [], files)
 
     def edit(self, chat_id: ChatId, message_id: MessageId, text: str, mention: Mention | None = None) -> dict:
         """Rewrite a posted message; Telegram's « message is not modified » is raised as ``BugsError``."""
@@ -221,6 +224,10 @@ class TelegramChannel:
     def delete(self, chat_id: ChatId, message_id: MessageId) -> None:
         """Delete a message the bot posted (a bot may delete its own messages in a group)."""
         self._api.call("deleteMessage", chat_id=chat_id, message_id=message_id)
+
+    def delete_file(self, file_id: str) -> None:
+        """Telegram's images are messages: there is no file to delete apart from them."""
+        raise BugsError(f"no file apart from its message on Telegram: {file_id}")
 
     def react(self, chat_id: ChatId, message_id: MessageId, emoji: str) -> None:
         """Put ``emoji`` on a message (a bot holds one reaction per message: it replaces the last)."""
