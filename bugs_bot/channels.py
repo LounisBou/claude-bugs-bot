@@ -13,21 +13,27 @@ from bugs_bot.channel import Body, Channel, Transport
 from bugs_bot.errors import BugsError
 
 HTTP_TIMEOUT = 30
-# The kinds whose platform holds a read until a message arrives and hands the bot's messages to one reader:
-# Pull long-polls them and logs the chats it drops, for ``init``. Any other kind is read again each round.
-LONG_POLL_KINDS = {"telegram"}
-# Each kind: how its token is read, and its channel built from the token, the transport, the env and the clock.
+# Each kind: its class, how its token is read, and its channel built from the token, the transport, the env and
+# the clock.
 _KINDS = {
     "telegram": (
+        telegram.TelegramChannel,
         telegram.read_token,
         lambda token, transport, env, clock: telegram.TelegramChannel(token, transport, telegram.api_root(env)),
     ),
     "slack": (
+        slack.SlackChannel,
         slack.read_token,
         lambda token, transport, env, clock: slack.SlackChannel(token, transport, slack.api_root(env), clock),
     ),
 }
 KINDS = tuple(_KINDS)
+# The kinds whose platform holds a read until a message arrives and hands the bot's messages to one reader
+# (``Channel.exclusive``): Pull long-polls them and logs the chats it drops, for ``init``. Any other kind is read
+# again each round.
+LONG_POLL_KINDS = frozenset(kind for kind, (cls, _, _) in _KINDS.items() if cls.exclusive)
+# Every implementation's token shape: masked in any text shown, whichever channel is in use.
+TOKEN_SHAPES = tuple(cls.TOKEN_SHAPE for cls, _, _ in _KINDS.values())
 
 
 class _KeepCredentialHome(urllib.request.HTTPRedirectHandler):
@@ -85,7 +91,7 @@ def channel_for(kind: str, env: Mapping[str, str], transport: Transport, clock: 
     """
     if kind not in _KINDS:
         raise BugsError(f"unknown channel: {kind}")
-    read_token, build = _KINDS[kind]
+    _, read_token, build = _KINDS[kind]
     return build(read_token(env), transport, env, clock)
 
 
@@ -102,7 +108,28 @@ def token_problem(kind: str, env: Mapping[str, str]) -> str | None:
     if kind not in _KINDS:
         return f"unknown channel: {kind}"
     try:
-        _KINDS[kind][0](env)
+        _KINDS[kind][1](env)
     except BugsError as exc:
         return str(exc)
     return None
+
+
+def mask(text: str, secret: str | None) -> str:
+    """Hide the channel's credential, and anything shaped like any platform's token, in ``text``.
+
+    Args:
+        text: Message about to be shown (an error, a URL...).
+        secret: The credential in use, if known.
+
+    Returns:
+        ``text`` with every credential replaced by ``<token>``.
+    """
+    if secret:
+        text = text.replace(secret, "<token>")
+        # A bot token is "<bot id>:<secret part>": the secret part alone must not show either.
+        part = secret.split(":", 1)[-1]
+        if part:
+            text = text.replace(part, "<token>")
+    for shape in TOKEN_SHAPES:
+        text = shape.sub("<token>", text)
+    return text

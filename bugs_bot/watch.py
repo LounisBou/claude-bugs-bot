@@ -6,8 +6,8 @@ import signal
 import sys
 from collections.abc import Callable, Mapping
 
-from bugs_bot.channel import Transport, mask
-from bugs_bot.channels import LONG_POLL_KINDS, channel_for, token_problem
+from bugs_bot.channel import Transport
+from bugs_bot.channels import LONG_POLL_KINDS, channel_for, mask, token_problem
 from bugs_bot.errors import BugsError
 from bugs_bot.pull import cmd_pull
 from bugs_bot.store import Machine
@@ -22,7 +22,6 @@ BACKOFF_FIRST = 5
 BACKOFF_CEILING = 60
 # The 30-day purge needs no more than an hourly look.
 PURGE_EVERY = 3600
-TELEGRAM = "telegram"
 
 
 class Failure:
@@ -55,8 +54,8 @@ def pull_round(
     """Pull every channel kind once: the long-polled one first (held ``poll_timeout`` s, or ``SHORT_HOLD`` while
     another kind is registered), then each chat of every other kind, its cursor saved after its own batch.
 
-    Telegram is read while one of its projects is registered, while nothing at all is, or while its token is there:
-    the chats it drops are how ``init`` finds a new group. One channel's failure never keeps another unread.
+    A long-polled kind (Telegram) is read while one of its projects is registered, while nothing at all is, or while
+    its token is there: the chats it drops are how ``init`` finds a new group. One channel's failure never keeps another unread.
     ``quiet`` drops the « no new report » trace (a loop of rounds would print it every few seconds).
 
     Returns:
@@ -70,10 +69,11 @@ def pull_round(
     failures: list[Failure] = []
     hold = poll_timeout if kinds <= LONG_POLL_KINDS else min(poll_timeout, SHORT_HOLD)
     held = False
-    if TELEGRAM in kinds or not kinds or token_problem(TELEGRAM, env) is None:
-        failures += _pull(machine, env, transport, TELEGRAM, now, hold, purge, None, quiet)
-        held = hold > 0
-    for kind in sorted(kinds - {TELEGRAM}):
+    for kind in sorted(LONG_POLL_KINDS):
+        if kind in kinds or not kinds or token_problem(kind, env) is None:
+            failures += _pull(machine, env, transport, kind, now, hold, purge, None, quiet)
+            held = held or hold > 0
+    for kind in sorted(kinds - LONG_POLL_KINDS):
         for chat_id in [chat for k, chat in entries if k == kind]:
             failures += _pull(machine, env, transport, kind, now, 0, purge, [chat_id], quiet)
     return failures, held

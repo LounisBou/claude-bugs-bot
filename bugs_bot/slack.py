@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -63,6 +64,8 @@ class SlackChannel:
 
     kind = "slack"
     exclusive = False  # every read is a plain request: a second reader takes nothing from Pull
+    # A Slack token's shape (bot, app, user): masked in any text, even when it is not the token in use.
+    TOKEN_SHAPE = re.compile(r"xox[abp]-[A-Za-z0-9-]+")
 
     def __init__(
         self, token: str, transport: Transport, root: str = DEFAULT_API_ROOT, clock: Callable[[], float] = time.time

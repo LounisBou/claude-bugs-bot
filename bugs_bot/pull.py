@@ -8,7 +8,8 @@ import sys
 from datetime import datetime, timezone
 
 from bugs_bot.answers import record_answer
-from bugs_bot.channel import Channel, ChatId, InboundMessage, MessageId, mask
+from bugs_bot.channel import Channel, ChatId, InboundMessage, MessageId
+from bugs_bot.channels import mask
 from bugs_bot.errors import BugsError
 from bugs_bot.followup import clear_answered
 from bugs_bot.people import record_language

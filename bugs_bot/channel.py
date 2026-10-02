@@ -7,7 +7,6 @@ platform may name its chats and messages with strings.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, TypedDict
@@ -23,11 +22,6 @@ Transport = Callable[..., "tuple[int, bytes]"]
 # A platform may name its chats and messages with strings (Slack's are).
 ChatId = int | str
 MessageId = int | str
-
-# A bot token's shape (digits, a colon, a secret): hidden even when it is not the token in use.
-_BOT_TOKEN_SHAPE = re.compile(r"\d{3,}:[A-Za-z0-9_-]{10,}")
-# A Slack token's shape (bot, app, user): hidden the same way.
-_SLACK_TOKEN_SHAPE = re.compile(r"xox[abp]-[A-Za-z0-9-]+")
 
 
 class Mention(TypedDict):
@@ -144,25 +138,6 @@ class Channel(Protocol):
     def secret(self) -> str | None:
         """The credential, for masking only."""
         ...
-
-
-def mask(text: str, secret: str | None) -> str:
-    """Hide the channel's credential, and anything shaped like a bot token, in ``text``.
-
-    Args:
-        text: Message about to be shown (an error, a URL...).
-        secret: The credential in use, if known.
-
-    Returns:
-        ``text`` with every credential replaced by ``<token>``.
-    """
-    if secret:
-        text = text.replace(secret, "<token>")
-        # A bot token is "<bot id>:<secret part>": the secret part alone must not show either.
-        part = secret.split(":", 1)[-1]
-        if part:
-            text = text.replace(part, "<token>")
-    return _SLACK_TOKEN_SHAPE.sub("<token>", _BOT_TOKEN_SHAPE.sub("<token>", text))
 
 
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost")

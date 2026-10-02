@@ -7,8 +7,8 @@ import json
 import pytest
 from fake_slack import CHANNEL, ROOT, SLACK_TOKEN, FakeSlack, msg, ts, user
 
-from bugs_bot.channel import Attachment, Author, Body, mask
-from bugs_bot.channels import channel_for, token_problem
+from bugs_bot.channel import Attachment, Author, Body
+from bugs_bot.channels import channel_for, mask, token_problem
 from bugs_bot.errors import BugsError, RateLimited
 from bugs_bot.slack import GONE, SlackChannel
 

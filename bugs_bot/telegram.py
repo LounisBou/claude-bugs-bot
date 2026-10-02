@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -118,6 +119,8 @@ class TelegramChannel:
 
     kind = "telegram"
     exclusive = True  # Telegram hands a bot's updates to one getUpdates consumer
+    # A bot token's shape (digits, a colon, a secret): masked in any text, even when it is not the token in use.
+    TOKEN_SHAPE = re.compile(r"\d{3,}:[A-Za-z0-9_-]{10,}")
 
     def __init__(self, token: str, transport: Transport, root: str = DEFAULT_API_ROOT) -> None:
         self._api = Api(token, transport, root)
