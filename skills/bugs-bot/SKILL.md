@@ -35,7 +35,7 @@ Run as the plain `bugs-bot <command>` (the fixed launcher `/bugs-bot:doctor` ins
 | `taken <id>` | The bug is taken up: 👨‍💻 reaction, status `taken`. Refused on a closed report. |
 | `done <id> [--reason "<text>"]` | Close a report without a fix (not a bug, duplicate, a question answered): status `done`, no reaction; `--reason` posts it as a reply. Leaves `list`. |
 | `post "<text>" [--mention <id>] [--image <path> …]` | A one-off message in the group, not threaded (an announcement), with screenshots as for `reply`; recorded in `state.json`. `--mention <report-id>` mentions that report's author, as above. |
-| `backfill-authors` | For reports written before `author_id` existed: asks Telegram for the group's administrators and records the user id of the one whose name matches the report's author — only when proven (every member is an administrator, and exactly one human administrator bears that name); otherwise says so and leaves the report alone. Never guesses. |
+| `backfill-authors` | For reports written before `author_id` existed: asks the platform for the group's administrators and records the user id of the one whose name matches the report's author — only when proven (every member is an administrator, and exactly one human administrator bears that name); otherwise says so and leaves the report alone. Never guesses. |
 | `person <report-id\|author_id>` | What is remembered about a person: display name, language (`language: <code>`, or `language: unknown`) and dated notes (device, iOS, PWA or browser, preferences, what they reported or verified, the tone they like). Nothing is sent to Telegram. |
 | `person-note <report-id\|author_id> "<text>"` | Add a dated note to that person's card, created on the first one. |
 | `person-lang <report-id\|author_id> <code>` | Set the language that person is written to in (two lower-case letters). `pull` records it from the platform when the person first writes (Telegram's `language_code`) and never overwrites it; this is the correction when they write in another language. |
@@ -120,9 +120,9 @@ The 2026-10-02 case, four « vérifier » texts that all opened « Laura Avant d
 
 ## Rules
 
-- The bot token is read from `~/.bugs-bot/.env` (`TELEGRAM_BOT_TOKEN`, or the file named by `BUGS_BOT_ENV_FILE`) by the tool only. Never print, log or copy it; errors mask it.
+- The bot token is read from `~/.bugs-bot/.env` (`TELEGRAM_BOT_TOKEN`, `SLACK_BOT_TOKEN`, or the file named by `BUGS_BOT_ENV_FILE`) by the tool only. Never print, log or copy it; errors mask it.
 - Only registered groups are ever read into reports. Other chats' messages are dropped, and their chat id and title logged for `init`.
-- Errors (`ok: false`, HTTP failure) end the command with a non-zero exit and Telegram's description. A failed image download leaves the offset where it was, so the next `pull` retries.
+- Errors (`ok: false`, HTTP failure) end the command with a non-zero exit and the platform's error. A failed image download leaves the cursor where it was, so the next `pull` retries.
 
 ## Warning — `getUpdates` consumes the bot's updates
 
@@ -130,6 +130,6 @@ The 2026-10-02 case, four « vérifier » texts that all opened « Laura Avant d
 
 ## Setup by the operator
 
-1. In @BotFather, `/setprivacy` → the bot → Disable, then remove and re-add it to the group — or make it an administrator of the group.
+1. Telegram: in @BotFather, `/setprivacy` → the bot → Disable, then remove and re-add it to the group — or make it an administrator of the group. Slack: one app with the bot token scopes the README lists, invited into each project's channel (`/invite @<app>`).
 2. `/bugs-bot:doctor` once per machine (it installs the `bugs-bot` launcher and says what is missing, the allow rule `Bash(bugs-bot:*)` included).
-3. In the project's repository: `/bugs-bot:init` (it asks you to post one message in the new group), then `/bugs-bot:start`.
+3. In the project's repository: `/bugs-bot:init` (it asks you to post one message in the new Telegram group, or lists the Slack channels the app is in), then `/bugs-bot:start`.
