@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 
 from bugs_bot.errors import BugsError
+from bugs_bot.project import DEFAULT_GATE_TOKENS
 from bugs_bot.store import Store, write_json
 
-# The agent hands over at DEFAULT_GATE_TOKENS tokens, on a window of GATE_FULL_WINDOW or more;
+# The agent hands over at DEFAULT_GATE_TOKENS tokens (project.py), on a window of GATE_FULL_WINDOW or more;
 # on a smaller one, at GATE_SMALL_WINDOW_SHARE of the window.
-DEFAULT_GATE_TOKENS = 300_000
 GATE_FULL_WINDOW = 1_000_000
 GATE_SMALL_WINDOW_SHARE = 0.8
 
