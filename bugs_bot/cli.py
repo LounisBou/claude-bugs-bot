@@ -28,11 +28,10 @@ from bugs_bot.doctor import cmd_doctor, pull_processes
 from bugs_bot.errors import BugsError
 from bugs_bot.gate import cmd_gate
 from bugs_bot.init import InitArgs, cmd_init, cmd_remove, repo_root
-from bugs_bot.people import cmd_person, cmd_person_note
+from bugs_bot.people import cmd_backfill_authors, cmd_person, cmd_person_note
 from bugs_bot.project import find_project_file, load_project, resolve_project
 from bugs_bot.pull import POLL_TIMEOUT, cmd_pull, pull_loop, watch_loop
 from bugs_bot.reports import (
-    cmd_backfill_authors,
     cmd_done,
     cmd_edit,
     cmd_fixed,
