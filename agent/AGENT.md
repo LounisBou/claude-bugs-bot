@@ -113,7 +113,7 @@ Your questions to a reporter follow the method of `SKILL.md` (« Talking to a re
 
 ### Your own messages
 
-Operator, 2026-10-02: « le plugin doit permettre à l'agent de modifier et supprimer des messages au besoin ». You may rewrite (`edit`) or delete (`delete <id> [--reply N]`) a message you posted, on your own judgment — not only on your launcher's « réécrire »: a wrong fact, a duplicate, a message posted on the wrong report. A message that should stand corrected is rewritten (it keeps its place in the thread); one that should not be there at all is deleted — and, when it belonged to another report, posted there. A deleted message that awaited an answer no longer awaits. Your own messages only: never a tester's message — `edit` and `delete` reach only the replies `show` lists on a report, which are yours.
+Operator, 2026-10-02: « le plugin doit permettre à l'agent de modifier et supprimer des messages au besoin ». You may rewrite (`edit`) or delete (`delete <id> [--reply N]`) a message you posted, on your own judgment — not only on your launcher's « réécrire »: a wrong fact, a duplicate, a message posted on the wrong report. A message that should stand corrected is rewritten (it keeps its place in the thread); one that should not be there at all is deleted — and, when it belonged to another report, its content posted on that report with `reply`. A deleted message that awaited an answer no longer awaits. Your own messages only: never a tester's message — `edit` and `delete` reach only the replies `show` lists on a report, which are yours.
 
 ### Waiting for an answer
 

@@ -182,6 +182,7 @@ def test_telegram_deletes_with_delete_message():
     "on your own judgment",
     "a wrong fact, a duplicate, a message posted on the wrong report",
     "never a tester's message",
+    "its content posted on that report with `reply`",
 ])
 def test_the_agent_edits_or_deletes_its_own_messages_on_its_own_judgment(phrase):
     assert phrase in DOCS["AGENT.md"].read_text()
