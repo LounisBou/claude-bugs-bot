@@ -393,3 +393,111 @@ def test_an_unreadable_registry_fails_the_round_never_the_watch(bugs_home, env, 
 
     assert code == 0 and slept == [5, 10]
     assert "cannot read the registry" in capsys.readouterr().err
+
+
+def test_a_reply_in_the_thread_of_a_fixed_report_answers_its_check(bugs_home, slack_repo, env):
+    # « vérifier » is asked once the report is fixed: its thread is still read.
+    api = FakeSlack()
+    api.history[CHANNEL] = [msg(ts(1), "le lecteur plante")]
+    assert cli.main(["pull"], transport=Both(FakeTelegram(), api), env=env, now=NOW) == 0
+    (report_id, report), = reports_of(bugs_home, "sla").items()
+    path = bugs_home / "sla" / "inbox" / report_id / "report.json"
+    path.write_text(json.dumps(report | {"status": "fixed", "awaiting": {"since": "2026-10-02T08:40:00+00:00", "reply": 1}}))
+    api.replies[(CHANNEL, ts(1))] = [msg(ts(3700), "c'est bon chez moi", thread_ts=ts(1))]
+
+    assert cli.main(["pull"], transport=Both(FakeTelegram(), api), env=env, now=NOW + 60) == 0
+
+    after = reports_of(bugs_home, "sla")[report_id]
+    assert after["answers"][0]["text"] == "c'est bon chez moi"
+    assert "awaiting" not in after and after["status"] == "fixed"
+
+
+class SlackRounds:
+    """A Slack-only transport that stops a watch loop (SIGINT) at the ``conversations.history`` call after ``rounds``."""
+
+    def __init__(self, api: FakeSlack, rounds: int) -> None:
+        self.api, self.rounds = api, rounds
+
+    def __call__(self, url: str, payload: dict | None = None, timeout: float | None = None, headers: dict | None = None):
+        if "/conversations.history?" in url and len(self.api.of("conversations.history")) >= self.rounds:
+            raise KeyboardInterrupt
+        return self.api(url, payload, timeout, headers)
+
+
+def test_a_slack_only_watch_pauses_between_clean_rounds(bugs_home, slack_repo, tmp_path):
+    from bugs_bot.watch import SHORT_HOLD
+
+    env_file = tmp_path / "slack-only.env"
+    env_file.write_text(f"SLACK_BOT_TOKEN={SLACK_TOKEN}\n")
+    env = {"BUGS_BOT_ENV_FILE": str(env_file), "BUGS_BOT_HOME": str(bugs_home)}
+    slept: list[float] = []
+
+    code = cli.main(["pull", "--watch"], transport=SlackRounds(FakeSlack(), rounds=3), env=env, now=NOW, sleep=slept.append, clock=lambda: 0.0)
+
+    assert code == 0 and slept == [SHORT_HOLD] * 3  # nothing held the request: the loop waits instead
+
+
+def test_a_round_whose_telegram_read_was_held_adds_no_pause(tmp_path, bugs_home, slack_repo, env):
+    register(bugs_home, tmp_path / "repo-tg", "tele", GROUP_ID, "Tele Bugs")
+    slept: list[float] = []
+
+    cli.main(["pull", "--watch"], transport=Both(FakeTelegram(), FakeSlack(), rounds=3), env=env, now=NOW, sleep=slept.append, clock=lambda: 0.0)
+
+    assert slept == []
+
+
+def test_a_watch_on_a_slack_project_with_nothing_new_prints_nothing(tmp_path, bugs_home, slack_repo, env, capsys):
+    register(bugs_home, tmp_path / "repo-tg", "tele", GROUP_ID, "Tele Bugs")
+
+    cli.main(["pull", "--watch"], transport=Both(FakeTelegram(), FakeSlack(), rounds=3), env=env, now=NOW, sleep=_stop, clock=lambda: 0.0)
+
+    assert capsys.readouterr().out == "bugs-bot: stopped\n"
+
+
+def test_a_pull_reads_slack_back_from_its_own_time_never_the_machine_s_date(bugs_home, slack_repo, env):
+    # A week before the clock of the machine running the tests: the day looked back is the round's.
+    week = 7 * 86400
+    api = FakeSlack()
+    api.history[CHANNEL] = [msg(ts(1 - week), "un bug d'il y a une semaine")]
+
+    assert cli.main(["pull"], transport=Both(FakeTelegram(), api), env=env, now=NOW - week) == 0
+
+    assert api.of("conversations.history")[0]["oldest"] == f"{NOW - week - 86400:.6f}"
+    assert len(reports_of(bugs_home, "sla")) == 1
+
+
+def test_a_telegram_failure_never_keeps_slack_unread(tmp_path, bugs_home, slack_repo, env, capsys):
+    register(bugs_home, tmp_path / "repo-tg", "tele", GROUP_ID, "Tele Bugs")
+    tg = FakeTelegram([message(5, 50, text="perdu pour ce tour")])
+    tg.api_error = {"ok": False, "error_code": 502, "description": "Bad Gateway"}
+    api = FakeSlack()
+    api.history[CHANNEL] = [msg(ts(1), "un bug slack")]
+
+    code = cli.main(["pull"], transport=Both(tg, api), env=env, now=NOW)
+
+    assert code == 1 and "Bad Gateway" in capsys.readouterr().err
+    assert reports_of(bugs_home, "tele") == {} and len(reports_of(bugs_home, "sla")) == 1
+    assert Machine(bugs_home).load_cursor("slack") == {CHANNEL: {"ts": ts(1), "threads": {}}}
+    assert Machine(bugs_home).load_cursor("telegram") is None
+
+
+def test_one_slack_chat_s_failure_never_keeps_another_unread(tmp_path, bugs_home, slack_repo, env, capsys):
+    # Projects are read in registration order: the failing one first.
+    register(bugs_home, tmp_path / "repo-sla2", "sla2", "G0SECOND", "sla2-bugs", channel="slack")
+    api = FakeSlack()
+    api.history["G0SECOND"] = [msg(ts(2), "un bug du second", "U0BOB")]
+    real = api._answer
+
+    def answer(method: str, params: dict) -> dict:
+        if method == "conversations.history" and params["channel"] == CHANNEL:
+            return {"ok": False, "error": "channel_not_found"}
+        return real(method, params)
+
+    api._answer = answer
+
+    code = cli.main(["pull"], transport=Both(FakeTelegram(), api), env=env, now=NOW)
+
+    assert code == 1 and "conversations.history: channel_not_found" in capsys.readouterr().err
+    assert [c["params"]["channel"] for c in api.calls if c["method"] == "conversations.history"] == [CHANNEL, "G0SECOND"]
+    assert reports_of(bugs_home, "sla") == {} and len(reports_of(bugs_home, "sla2")) == 1
+    assert Machine(bugs_home).load_cursor("slack") == {"G0SECOND": {"ts": ts(2), "threads": {}}}

@@ -8,13 +8,14 @@ import sys
 from datetime import datetime, timezone
 
 from bugs_bot.answers import record_answer
-from bugs_bot.channel import Channel, ChatId, InboundMessage, MessageId, mask
+from bugs_bot.channel import Channel, ChatId, InboundMessage, MessageId
+from bugs_bot.channels import mask
 from bugs_bot.errors import BugsError
 from bugs_bot.followup import clear_answered
 from bugs_bot.people import record_language
 from bugs_bot.reactions import retry_pending_reactions
 from bugs_bot.project import PROJECT_FILE, rebind_chat
-from bugs_bot.store import CLOSED_STATUSES, EMOJI_SEEN, OPEN_STATUSES, Machine, Store, locked, write_json
+from bugs_bot.store import CLOSED_STATUSES, EMOJI_SEEN, Machine, Store, locked, write_json
 from bugs_bot.registry import Entry
 
 # Long polling (`pull --watch`): the channel holds a request until a message arrives or POLL_TIMEOUT seconds pass.
@@ -129,14 +130,17 @@ def follow_migrations(machine: Machine, kind: str, entries: dict[ChatId, Entry],
 
 
 def open_threads(machine: Machine, entries: dict[ChatId, Entry]) -> dict[ChatId, list[MessageId]]:
-    """Return, per chat, the first message of each open report: the threads a platform that threads reads replies in."""
+    """Return, per chat, the first message of each report not ``done``: the threads a platform that threads reads replies in.
+
+    A ``fixed`` report is still followed: the person is asked to check the fix there, and answers there.
+    """
     threads: dict[ChatId, list[MessageId]] = {}
     for chat_id, entry in entries.items():
         reports = machine.project_store(entry.project).reports()
         threads[chat_id] = [
             report["message_ids"][0]
             for _, _, report in reports
-            if report["status"] in OPEN_STATUSES and report.get("chat_id", chat_id) == chat_id and report.get("message_ids")
+            if report["status"] != "done" and report.get("chat_id", chat_id) == chat_id and report.get("message_ids")
         ]
     return threads
 
@@ -148,6 +152,7 @@ def cmd_pull(
     poll_timeout: int = 0,
     purge: bool = True,
     chats: list[ChatId] | None = None,
+    quiet: bool = False,
 ) -> None:
     """Collect new messages of every registered chat of the channel into its project's reports.
 
@@ -164,6 +169,7 @@ def cmd_pull(
         poll_timeout: Seconds the channel may hold the request waiting for a message (0: answer at once).
         purge: Also delete closed reports past retention.
         chats: Only these chats of the channel (default: every registered one).
+        quiet: Print no « no new report » line (a loop of rounds would print it every round).
 
     Raises:
         BugsError: If a report could not be built, after every other one was (the others go to stderr).
@@ -215,8 +221,8 @@ def cmd_pull(
             if answered:
                 answers.append((project, answered))
             clear_answered(store, msg.author.id, msg.author.name, msg.date)
-    if not created and not answers and not failures and not poll_timeout:
-        print("bugs-bot: no new report")  # a scheduled run leaves a trace in the PM2 log; a held one would flood it
+    if not created and not answers and not failures and not quiet:
+        print("bugs-bot: no new report")  # a scheduled run leaves a trace in the PM2 log
     for project, report_id, group in created:
         images = sum(len(m.attachments) for m in group)
         print(f"new {report_id} ({images} image{'s' * (images != 1)}) in {project}")

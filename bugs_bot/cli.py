@@ -24,8 +24,8 @@ from pathlib import Path
 
 from bugs_bot import parser
 from bugs_bot.agent import cmd_agent_prompt, cmd_deployed, cmd_overdue, cmd_pending, cmd_triage, cmd_wait
-from bugs_bot.channel import Transport, mask
-from bugs_bot.channels import channel_for, http_transport, token_problem
+from bugs_bot.channel import Transport
+from bugs_bot.channels import channel_for, http_transport, mask, token_problem
 from bugs_bot.doctor import cmd_doctor, pull_processes
 from bugs_bot.errors import BugsError
 from bugs_bot.followup import cmd_escalated

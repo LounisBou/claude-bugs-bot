@@ -9,18 +9,20 @@ import pytest
 
 from conftest import REPO_ROOT
 
-# Telegram's Bot API: its host, its methods, the update fields read, its token's variable.
+# Telegram's Bot API: its host, its methods, the update fields read, its token's variable; and its kind's name.
 TELEGRAM_WIRE = re.compile(
     r"api\.telegram\.org|getUpdates|sendMessage|editMessageText|deleteMessage|setMessageReaction|getFile"
     r"|sendPhoto|sendMediaGroup|caption_entities|attach://"
     r"|getChatAdministrators|getChatMemberCount|getMe|update_id|migrate_to_chat_id|migrate_from_chat_id"
     r"|media_group_id|language_code|reply_parameters|text_mention|TELEGRAM_BOT_TOKEN|is_bot|\[.from.\]"
+    r"|BUGS_BOT_API_ROOT|allowed_updates|sendPhoto|sendMediaGroup|edited_message|[\"']telegram[\"']"
 )
-# Slack's Web API: its hosts, its methods, the message fields read, its token's variable and shape.
+# Slack's Web API: its hosts, its methods, the message fields read, its token's variable and shape; and its kind's name.
 SLACK_WIRE = re.compile(
     r"slack\.com|conversations\.(history|replies|members|info)|users\.(info|conversations)"
     r"|chat\.(postMessage|update|delete)|reactions\.(add|remove)|auth\.test|url_private|thread_ts"
-    r"|SLACK_BOT_TOKEN|BUGS_BOT_SLACK_API_ROOT|files\.(getUploadURLExternal|completeUploadExternal)|upload_url|initial_comment"
+    r"|SLACK_BOT_TOKEN|BUGS_BOT_SLACK_API_ROOT|xox[abp]-|response_metadata|next_cursor|bot_id|upload_url|initial_comment"
+    r"|\b(conversations|users|chat|reactions|files|auth)\.[a-z]+|[\"']slack[\"']"
 )
 OWNERS = {
     "telegram": ({"bugs_bot/telegram.py", "bugs_bot/telegram_inbound.py"}, TELEGRAM_WIRE),
@@ -36,6 +38,23 @@ ALLOWED = {
     # The contract's comment on group_key, and the key report.json has always stored it under.
     ("bugs_bot/channel.py", "Telegram's media_group_id"),
     ("bugs_bot/pull.py", '"media_group_id": first.group_key'),
+    # The factory: the one module naming the implementations, by kind (spec § 3.1).
+    ("bugs_bot/channels.py", '"telegram": ('),
+    ("bugs_bot/channels.py", '"slack": ('),
+    # A project file written before Slack names no channel: it reads as Telegram's.
+    ("bugs_bot/project.py", 'DEFAULT_CHANNEL = "telegram"'),
+    # The type each kind's chat id is checked against in a project file (a Telegram id is an int).
+    ("bugs_bot/project.py", '"telegram": (int, None)'),
+    ("bugs_bot/project.py", '"slack": (str, re.compile('),
+    # Telegram's cursor stays the ``offset`` key state.json has always held.
+    ("bugs_bot/store.py", 'if kind == "telegram":'),
+    # A local variable named ``chat`` (a Batch's chat entry, a Telegram chat object), not Slack's ``chat.*`` methods.
+    ("bugs_bot/init.py", 'chat.get("title")'),
+    ("bugs_bot/pull.py", "chat.get('title', '')"),
+    ("bugs_bot/store.py", '"title": chat.get("title")'),
+    ("bugs_bot/store.py", '"type": chat.get("type")'),
+    ("bugs_bot/telegram_inbound.py", 'chat.get("type") in GROUP_CHAT_TYPES'),
+    ("bugs_bot/telegram_inbound.py", 'chat.get("title", "")'),
 }
 
 
@@ -90,3 +109,19 @@ def test_the_guard_sees_a_wire_name_outside_its_modules_and_not_inside(tmp_path,
     owner = "bugs_bot/telegram.py" if platform == "telegram" else "bugs_bot/slack.py"
     assert f"bugs_bot/pull.py:2: {platform}: {line}" in found
     assert not any(item.startswith(owner) for item in found)
+
+
+def test_the_generic_channel_module_names_no_token_shape():
+    text = (REPO_ROOT / "bugs_bot" / "channel.py").read_text()
+
+    assert not re.search(r"xox|\\d\{3,\}:|TOKEN_SHAPE", text)
+
+
+def test_the_masks_and_the_long_polled_kinds_come_from_the_implementations():
+    from bugs_bot import channels
+    from bugs_bot.slack import SlackChannel
+    from bugs_bot.telegram import TelegramChannel
+
+    assert channels.TOKEN_SHAPES == (TelegramChannel.TOKEN_SHAPE, SlackChannel.TOKEN_SHAPE)
+    assert channels.LONG_POLL_KINDS == {"telegram"} and not hasattr(__import__("bugs_bot.watch").watch, "TELEGRAM")
+    assert channels.mask("a 999:ABCdef_ghi-123 and xoxb-1-2-abc", None) == "a <token> and <token>"
