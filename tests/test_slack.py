@@ -394,3 +394,22 @@ def test_a_poll_of_no_chat_lists_the_channels_the_bot_is_in(slack, api):
     }
     assert batch.messages == [] and batch.cursor == {}
     assert api.of("users.conversations")[0] == {"types": "public_channel,private_channel", "exclude_archived": "true", "limit": "200"}
+
+
+@pytest.mark.parametrize("error", ["thread_not_found", "message_not_found"])
+def test_a_thread_whose_parent_is_gone_is_dropped_and_the_poll_goes_on(slack, api, error):
+    api.history[CHANNEL] = [msg(ts(5), "nouveau")]
+    api.answers["conversations.replies"] = {"ok": False, "error": error}
+    cursor = {CHANNEL: {"ts": ts(2), "threads": {ts(1): ts(3)}}}
+
+    batch = slack.poll(cursor, [CHANNEL], 0, threads={CHANNEL: [ts(1)]})
+
+    assert [m.text for m in batch.messages] == ["nouveau"]
+    assert batch.cursor[CHANNEL]["ts"] == ts(5) and ts(1) not in batch.cursor[CHANNEL]["threads"]
+
+
+def test_any_other_refusal_of_a_thread_still_fails_the_poll(slack, api):
+    api.answers["conversations.replies"] = {"ok": False, "error": "channel_not_found"}
+
+    with pytest.raises(BugsError, match="conversations.replies: channel_not_found"):
+        slack.poll({CHANNEL: {"ts": ts(2), "threads": {}}}, [CHANNEL], 0, threads={CHANNEL: [ts(1)]})

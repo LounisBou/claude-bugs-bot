@@ -22,6 +22,8 @@ CONTENT_SUBTYPES = {None, "file_share", "thread_broadcast"}
 # Slack escapes these three in message text, and nothing else.
 _ESCAPES = (("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&"))
 PAGE = 200
+# The refusals of a thread whose parent message is gone (deleted): nothing will ever be read there again.
+GONE_THREAD = ("thread_not_found", "message_not_found")
 # A chat read for the first time is read from this far back, as Telegram keeps a bot's pending updates a day.
 FIRST_LOOK_BACK = 86400
 
@@ -146,8 +148,15 @@ def read_chat(
         if inbound is not None:
             found.append(inbound)
     threads = followed(state, listed)
-    for parent, last in threads.items():
-        for msg in _pages(call, "conversations.replies", {"channel": chat_id, "ts": parent, "oldest": last}):
+    for parent, last in list(threads.items()):
+        try:
+            replies = _pages(call, "conversations.replies", {"channel": chat_id, "ts": parent, "oldest": last})
+        except BugsError as exc:
+            if not str(exc).endswith(tuple(f": {error}" for error in GONE_THREAD)):
+                raise
+            del threads[parent]  # raising would hold the chat's cursor, and its new messages, for good
+            continue
+        for msg in replies:
             # The parent comes back with its replies, and ``oldest`` is a bound Slack may include.
             if msg["ts"] == parent or ts_key(msg["ts"]) <= ts_key(last):
                 continue
