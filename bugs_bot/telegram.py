@@ -18,6 +18,7 @@ from bugs_bot.store import bugs_home
 
 DEFAULT_API_ROOT = "https://api.telegram.org"
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
+API_ROOT_RULE = "BUGS_BOT_API_ROOT must be an https:// URL or http://127.0.0.1 / http://localhost"
 HTTP_TIMEOUT = 30
 # A held getUpdates request is read this much longer than Telegram holds it, so it is never cut.
 POLL_READ_MARGIN = 10
@@ -28,8 +29,7 @@ _BOT_TOKEN_SHAPE = re.compile(r"\d{3,}:[A-Za-z0-9_-]{10,}")
 def api_root(env: Mapping[str, str]) -> str:
     """Return the Bot API root: ``BUGS_BOT_API_ROOT`` when set (the end-to-end run's fake), else Telegram's.
 
-    The token travels in every URL built from the root, so only ``https://`` and the loopback over
-    plain ``http://`` are accepted.
+    The token travels in every URL built from the root: only ``https://`` and plain-http loopback pass.
 
     Args:
         env: Process environment (only ``BUGS_BOT_API_ROOT`` is consulted).
@@ -45,12 +45,10 @@ def api_root(env: Mapping[str, str]) -> str:
         parts = urlsplit(root)
         parts.port  # noqa: B018 - raises ValueError on a malformed port
     except ValueError:
-        parts = None
-    authority_is_bare = parts is not None and "@" not in parts.netloc
-    https = parts is not None and parts.scheme == "https" and bool(parts.hostname)
-    loopback = parts is not None and parts.scheme == "http" and parts.hostname in LOOPBACK_HOSTS
-    if not (authority_is_bare and (https or loopback)):
-        raise BugsError("BUGS_BOT_API_ROOT must be an https:// URL or http://127.0.0.1 / http://localhost")
+        raise BugsError(API_ROOT_RULE) from None
+    local = parts.scheme == "http" and parts.hostname in LOOPBACK_HOSTS
+    if "@" in parts.netloc or not (local or (parts.scheme == "https" and parts.hostname)):
+        raise BugsError(API_ROOT_RULE)
     return root.rstrip("/")
 
 
