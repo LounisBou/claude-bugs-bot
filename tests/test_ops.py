@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
-
 from conftest import REPO_ROOT
 
 
@@ -38,22 +34,61 @@ def test_pm2_config_keeps_the_restart_policy_and_no_cron():
     assert "cron_restart" not in exports
 
 
-def _api_root(**env: str) -> str:
-    base = {k: v for k, v in os.environ.items() if k != "BUGS_BOT_API_ROOT"}
-    out = subprocess.run(
-        [sys.executable, "-c", "from bugs_bot import telegram; print(telegram.API_ROOT)"],
-        cwd=REPO_ROOT, env=base | env, capture_output=True, text=True, check=True,
-    )
-    return out.stdout.strip()
+import pytest
+
+from bugs_bot.errors import BugsError
+from bugs_bot.telegram import TelegramChannel, api_root
+from samples import FakeTelegram
 
 
 def test_api_root_defaults_to_telegram():
-    assert _api_root() == "https://api.telegram.org"
+    assert api_root({}) == "https://api.telegram.org"
 
 
-def test_api_root_is_overridden_by_the_environment():
-    assert _api_root(BUGS_BOT_API_ROOT="http://127.0.0.1:9") == "http://127.0.0.1:9"
+@pytest.mark.parametrize(
+    "root",
+    ["https://bot.example.org", "http://127.0.0.1:9", "http://127.0.0.1", "http://localhost:8081", "http://localhost"],
+)
+def test_api_root_accepts_https_and_loopback_http(root):
+    assert api_root({"BUGS_BOT_API_ROOT": root}) == root
 
 
 def test_an_empty_api_root_falls_back_to_telegram():
-    assert _api_root(BUGS_BOT_API_ROOT="") == "https://api.telegram.org"
+    assert api_root({"BUGS_BOT_API_ROOT": ""}) == "https://api.telegram.org"
+
+
+@pytest.mark.parametrize(
+    "root",
+    [
+        "http://evil.example",
+        "http://127.0.0.1.evil.example",
+        "http://localhost.evil.example:80",
+        "http://user@127.0.0.1:9",
+        "ftp://127.0.0.1",
+        "file:///tmp/x",
+        "evil.example",
+    ],
+)
+def test_api_root_refuses_any_other_url_and_names_the_variable(root):
+    with pytest.raises(BugsError, match="BUGS_BOT_API_ROOT"):
+        api_root({"BUGS_BOT_API_ROOT": root})
+
+
+def test_the_refusal_does_not_hold_a_token():
+    with pytest.raises(BugsError) as caught:
+        api_root({"BUGS_BOT_API_ROOT": "http://evil.example/bot123456:SECRETSECRETSECRET"})
+    assert "SECRETSECRETSECRET" not in str(caught.value)
+
+
+def test_api_and_file_urls_are_built_from_the_same_root():
+    tg = FakeTelegram()
+    channel = TelegramChannel("123456789:AAFakeTokenFakeTokenFake", tg, "http://127.0.0.1:9")
+
+    channel.get_updates(None, 0)
+    channel.get_file("abc")
+
+    assert [url for url, _ in tg.calls] == [
+        "http://127.0.0.1:9/bot123456789:AAFakeTokenFakeTokenFake/getUpdates",
+        "http://127.0.0.1:9/bot123456789:AAFakeTokenFakeTokenFake/getFile",
+        "http://127.0.0.1:9/file/bot123456789:AAFakeTokenFakeTokenFake/photos/abc.jpg",
+    ]
