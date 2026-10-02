@@ -1,44 +1,54 @@
-"""The operations files: the PM2 process definition and the Bot API root override."""
+"""The operations files: the PM2 process definition and the Bot API root."""
 
 from __future__ import annotations
 
-from conftest import REPO_ROOT
-
-
-def _module_exports() -> str:
-    """Return the part of ``pm2.config.js`` after ``module.exports`` (comments above it excluded)."""
-    return (REPO_ROOT / "pm2.config.js").read_text().split("module.exports", 1)[1]
-
-
-def test_pm2_config_names_the_process_and_its_entry_point():
-    exports = _module_exports()
-
-    assert "name: 'bugs-bot-pull'" in exports
-    assert "script: __dirname + '/bin/bugs-bot'" in exports
-    assert "args: 'pull --watch'" in exports
-
-
-def test_pm2_interpreter_comes_from_the_environment_not_a_fixed_path():
-    exports = _module_exports()
-
-    assert "interpreter: process.env.BUGS_BOT_PYTHON || 'python3'" in exports
-    assert "/Users/" not in exports
-
-
-def test_pm2_config_keeps_the_restart_policy_and_no_cron():
-    exports = _module_exports()
-
-    assert "autorestart: true" in exports
-    assert "restart_delay: 60000" in exports
-    assert "kill_timeout: 5000" in exports
-    assert "cron_restart" not in exports
-
+import json
+import os
+import shutil
+import subprocess
 
 import pytest
 
 from bugs_bot.errors import BugsError
 from bugs_bot.telegram import TelegramChannel, api_root
+from conftest import REPO_ROOT
 from samples import FakeTelegram
+
+
+def _pm2_app(python: str | None) -> dict:
+    """Evaluate ``pm2.config.js`` with node, with or without ``BUGS_BOT_PYTHON``; return its one app."""
+    env = {k: v for k, v in os.environ.items() if k != "BUGS_BOT_PYTHON"}
+    if python is not None:
+        env["BUGS_BOT_PYTHON"] = python
+    out = subprocess.run(
+        ["node", "-e", "console.log(JSON.stringify(require(process.argv[1])))", str(REPO_ROOT / "pm2.config.js")],
+        env=env, capture_output=True, text=True, check=True,
+    )
+    (app,) = json.loads(out.stdout)["apps"]
+    return app
+
+
+needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+
+
+@needs_node
+@pytest.mark.parametrize("python", [None, "/opt/py/bin/python3"])
+def test_pm2_app_runs_the_pull_loop_with_the_restart_policy(python):
+    app = _pm2_app(python)
+
+    assert app["name"] == "bugs-bot-pull"
+    assert app["script"] == str(REPO_ROOT / "bin" / "bugs-bot")
+    assert app["args"] == "pull --watch"
+    assert app["autorestart"] is True
+    assert app["restart_delay"] == 60000
+    assert app["kill_timeout"] == 5000
+    assert "cron_restart" not in app
+
+
+@needs_node
+def test_pm2_interpreter_comes_from_the_environment_or_falls_back_to_python3():
+    assert _pm2_app("/opt/py/bin/python3")["interpreter"] == "/opt/py/bin/python3"
+    assert _pm2_app(None)["interpreter"] == "python3"
 
 
 def test_api_root_defaults_to_telegram():
