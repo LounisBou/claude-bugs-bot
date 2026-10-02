@@ -35,8 +35,9 @@ def _gate_setting(store: Store) -> int:
 def cmd_gate(store: Store, set_to: int | None, window: int | None, tokens: int | None) -> None:
     """Print the context gate in tokens; ``--set`` changes the setting, ``--tokens`` adds the verdict.
 
-    The setting lives in ``settings.json``, not in ``state.json``: ``pull`` rewrites the whole state
-    every round, and a hand edit there could be lost to it.
+    The setting lives in ``settings.json``, not in ``state.json``: the latter is the tool's own
+    record (``posts``...), written back whole by the commands that touch it, so a key set by hand
+    there is not safe.
 
     Raises:
         BugsError: If ``set_to`` is not a positive integer, or the setting file is unusable.
