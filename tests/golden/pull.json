@@ -3,7 +3,8 @@
     {
       "payload": {
         "allowed_updates": [
-          "message"
+          "message",
+          "edited_message"
         ],
         "timeout": 0
       },
