@@ -2,7 +2,7 @@
 
 Date: 2026-10-02. Checked against the sections of `docs/specs/2026-10-02-bugs-bot-design.md` its
 header « Amended 2026-10-02 » names — D4, criterion 6, § 3.1, § 3.2 (locked updates and edited
-messages), § 3.5, § 3.7, § 3.8 — on the head `0388062` (this document is the only change after it).
+messages), § 3.5, § 3.7, § 3.8 — on the head `05981b8` (this document is the only change after it).
 Each claim names the file that meets it and the test that shows it, or the gap. What the review
 verdicts of the amended work dropped is not reopened. The first conformity document,
 `2026-10-02-conformity.md`, stays the record for the sections the amendment did not touch.
@@ -158,6 +158,19 @@ Also on this branch, by the operator's ruling « B »: `0388062` `docs: Slack ed
 limitation of 0.1.0` (`README.md` « Known limitations », `CHANGELOG.md`). The Slack
 `message_changed` code is untouched (`git diff 915c072 -- bugs_bot` is empty).
 
+Fixed on the operator's word (the S6 of an earlier draft of this document): `05981b8` `docs: the
+readme and changelog say what the build does`. That commit:
+
+- `README.md` « Tests » and the `CHANGELOG.md` end-to-end line name the Slack project and the fake
+  Slack API beside the two Telegram projects. « Tests » also says the script starts and kills two
+  fake servers.
+- `README.md`'s command list gains `delete`, `unask` and `person-lang`.
+- In the same family as `42d7a3b`, `skills/bugs-bot/SKILL.md` no longer says `delete` goes
+  « through `deleteMessage` » only (Slack's is `chat.delete`). Nor does it say a person's language
+  comes from Telegram's `language_code` only (Slack's is `locale`).
+
+Text only, with no test: these are descriptions, not rules the agent or the operator acts on.
+
 ## Scope items, for the operator (not built)
 
 The first document's S1 (normalised inbound behind the channel), S2 (`fixed --note` in French) and
@@ -171,33 +184,26 @@ above.
 - **S5** Slack edit detection: the known limitation above. It means re-reading the open reports'
   messages, or adopting the Events API, which § 9 puts out of scope. It comes with the live Slack
   test.
-- **S6** Two lines describe the end-to-end run as Telegram only:
-  - `README.md` « Tests »: « two projects … against a fake Bot API ».
-  - `CHANGELOG.md`: « `tests/e2e.sh`: two projects driven … against a fake Bot API ».
 
-  The run now also drives a Slack project on a fake Slack API. `README.md`'s « What you get » list
-  of commands also lacks `delete`, `person-lang` and `unask`. These lines are outside `agent/`,
-  `commands/` and `skills/`, so they are left for the operator's word.
-
-## The gate, on `0388062`
+## The gate, on `05981b8`
 
 ```
 $ python3 -V
 Python 3.12.4
 $ python3 -m pytest -q
-1022 passed in 14.92s
+1022 passed in 13.37s
 $ ~/.pyenv/versions/3.10.9/bin/python3 -V
 Python 3.10.9
 $ ~/.pyenv/versions/3.10.9/bin/python3 -m pytest -q
-1022 passed in 15.65s
+1022 passed in 14.18s
 $ sh tests/e2e.sh
 …
-answer on 20261002-213640-1790977000-140884 in gamma
+answer on 20261002-214109-1790977269-443784 in gamma
 E2E OK
 $ ps -eo pid,command | grep -c '[h]ttp.server'
 0
 $ python3 -m pytest -q tests/test_guard.py tests/test_wire_guard.py
-16 passed in 0.18s
+16 passed in 0.17s
 $ wc -l bugs_bot/*.py
        1 bugs_bot/__init__.py
      236 bugs_bot/agent.py
