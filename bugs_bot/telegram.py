@@ -181,6 +181,7 @@ class TelegramChannel:
             ImagesNotSent: The text went out first and the images failed.
             BugsError: Nothing was posted.
         """
+        files = [wire_file(path, rank) for rank, path in enumerate(paths, 1)]  # read before anything goes out
         caption, entities = with_mention(mention, text) if mention else (text, [])
         posted = []
         if utf16_len(caption) > CAPTION_MAX:
@@ -189,7 +190,6 @@ class TelegramChannel:
         fields = {"chat_id": str(chat_id)}
         if reply_to is not None:
             fields["reply_parameters"] = json.dumps({"message_id": reply_to})
-        files = [wire_file(path, rank) for rank, path in enumerate(paths, 1)]
         try:
             if len(files) == 1:
                 fields |= {"caption": caption} if caption else {}

@@ -35,9 +35,17 @@ def wire_file(path: Path, rank: int) -> tuple[str, bytes, str]:
     """Return what a channel uploads for the ``rank``-th image (1-based): ``(name, bytes, content type)``.
 
     The name is a neutral ``image-<k>.<ext>``: the file's own name may tell a local detail, and the group sees it.
+
+    Raises:
+        BugsError: If the file can no longer be read, or is no longer an image (changed since ``check_images``).
     """
-    data = path.read_bytes()
-    ext = extension_of(data[:12]) or ".png"
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise BugsError(f"{path}: cannot read: {exc.strerror or exc.__class__.__name__}") from None
+    ext = extension_of(data[:12])
+    if ext is None:
+        raise BugsError(f"{path}: no longer a PNG, JPEG or WebP image")
     return f"image-{rank}{ext}", data, _TYPES[ext]
 
 

@@ -431,3 +431,15 @@ def test_the_launcher_knows_how_to_answer_a_capture_request(phrase):
 @pytest.mark.parametrize("phrase", ["files:write", "--image"])
 def test_the_readme_gives_the_slack_scope_and_the_option(phrase):
     assert phrase in README.read_text()
+
+
+@pytest.mark.parametrize("make_channel", [telegram, slack], ids=["telegram", "slack"])
+def test_an_image_gone_after_the_check_sends_nothing_not_even_a_long_text(tmp_path, make_channel):
+    channel, transport = make_channel()
+    paths = check_images([image(tmp_path, "a.png"), image(tmp_path, "b.png")])
+    paths[1].unlink()
+
+    with pytest.raises(BugsError, match="cannot read"):
+        channel.send_images(GROUP_ID if make_channel is telegram else CHANNEL, "x" * 1100, paths)
+
+    assert transport.calls == []

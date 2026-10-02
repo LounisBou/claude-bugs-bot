@@ -172,8 +172,7 @@ class SlackChannel:
         if mention:
             text = with_mention(mention, text)
         files = []
-        for rank, path in enumerate(paths, 1):
-            name, data, kind = wire_file(path, rank)
+        for name, data, kind in [wire_file(path, rank) for rank, path in enumerate(paths, 1)]:  # read before any upload
             ticket = self.call("files.getUploadURLExternal", filename=name, length=len(data))
             if not self._on_slack(ticket["upload_url"]):
                 raise BugsError("upload refused: the URL is not on Slack")
