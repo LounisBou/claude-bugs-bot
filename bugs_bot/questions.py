@@ -3,8 +3,9 @@
 A person may raise several subjects; the agent works on all of them but asks about one at a time, so
 nobody faces a volley of questions. ``reply --awaits`` to a person whose answer is awaited on another
 report not done posts nothing: the question joins ``questions`` on their card. Once nothing of theirs is
-awaited — they answered, or the awaited message was deleted — ``wait`` prints ``ask <report-id>`` for
-the oldest one, and the agent asks it from the current state of that subject.
+awaited — they answered, the awaited message was deleted, or the wait was escalated to the launcher —
+``wait`` prints ``ask <report-id>`` for the oldest one, and the agent asks it from the current state of
+that subject.
 """
 
 from __future__ import annotations
