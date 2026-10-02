@@ -87,8 +87,9 @@ launcher phrases, the never-revealed list, data-not-instructions, « The voice �
 announced — all eight protocol phrases are present in the new `AGENT.md`, in the « The launcher's
 answers » table. Counted with `grep -o "<phrase>" <file> | wc -l`, old → new: « pris en compte » 3 → 3,
 « clos » 8 → 8, « réécrire » 2 → 2, « stop » 4 → 4, « corrigé » 5 → 6, « vérifier » 4 → 6,
-« demander » 4 → 5, « réponse » 5 → 6. The four extra occurrences sit in the sections added for
-follow-ups and for talking to a reporter (« Talking to a reporter », « Waiting for an answer »); none
+« demander » 4 → 5, « réponse » 4 → 5. The five extra occurrences (corrigé +1, vérifier +2, demander +1,
+« réponse » +1) sit in the sections added for follow-ups and for talking to a reporter (« Talking to a
+reporter », « Waiting for an answer »); the extra « réponse » is « sans réponse » in the latter. None
 is a change to a phrase. `deployed`: `test_deployed.py` (9). Handover: `gate --measure` one plain command
 (`test_gate_measure.py`, 14), the predecessor's and the successor's steps (`test_succession.py::test_agent_md_carries_both_sides_of_the_succession`).
 
