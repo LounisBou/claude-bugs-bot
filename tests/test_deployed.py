@@ -44,13 +44,22 @@ def test_without_a_check_the_launchers_word_decides(run, bound, capsys):
     assert capsys.readouterr().out.strip() == "deployed=unknown: the launcher's word decides"
 
 
-def test_the_check_runs_in_the_repository(run, bound, capsys):
-    set_check("test -f .bugs-bot.json")
+def test_the_check_runs_in_the_repository_whatever_the_current_directory(run, bound, tmp_path, monkeypatch, capsys):
+    out = tmp_path / "where"
+    set_check(f'pwd -P > "{out}"')
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
 
-    assert run("deployed", COMMIT) == 0
+    assert run("deployed", COMMIT, "--project", "demo") == 0
+
+    assert out.read_text().strip() == str((tmp_path / "repo-demo").resolve())
 
 
-@pytest.mark.parametrize("bad", ["abc; touch pwned", "$(touch pwned)", "abc", "x" * 41, ""])
+@pytest.mark.parametrize(
+    "bad",
+    ["abc; touch pwned", "$(touch pwned)", "abc", "x" * 41, "", "abcdef1;touch pwned", "abcdef1\n", "abcdef1 ", "abcdef"],
+)
 def test_a_commit_that_is_not_a_hash_is_refused_before_anything_runs(run, bound, bad, capsys):
     set_check("touch ran")
 
@@ -58,3 +67,12 @@ def test_a_commit_that_is_not_a_hash_is_refused_before_anything_runs(run, bound,
 
     assert not (Path.cwd() / "ran").exists() and not (Path.cwd() / "pwned").exists()
     assert "deployed=" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("good", ["abcdef1", "a" * 40, "ABCDEF1"])
+def test_seven_to_forty_hex_digits_are_accepted(run, bound, good, capsys):
+    set_check("true")
+
+    assert run("deployed", good) == 0
+
+    assert capsys.readouterr().out.strip() == "deployed=yes"
