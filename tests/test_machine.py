@@ -76,3 +76,42 @@ def test_project_store_is_the_project_directory(machine, tmp_path):
 def test_project_store_refuses_an_id_that_could_leave_the_home(machine, bad):
     with pytest.raises(BugsError, match="project"):
         machine.project_store(bad)
+
+
+def test_a_corrupt_unregistered_log_is_an_empty_one_and_says_so(machine, tmp_path, capsys):
+    (tmp_path / "home").mkdir()
+    path = tmp_path / "home" / "unregistered.json"
+    path.write_text("{nope")
+
+    assert machine.unregistered() == {}
+
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1 and str(path) in err[0]
+
+
+@pytest.mark.parametrize("content", ["[]", '{"x": {}}', '{"1": "a"}'])
+def test_a_misshapen_unregistered_log_is_an_empty_one(machine, tmp_path, content, capsys):
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "unregistered.json").write_text(content)
+
+    assert machine.unregistered() == {}
+
+    assert "unregistered.json" in capsys.readouterr().err
+
+
+def test_noting_a_chat_repairs_a_corrupt_unregistered_log(machine, tmp_path):
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "unregistered.json").write_text("{nope")
+
+    machine.note_unregistered({"id": -5, "title": "T", "type": "group"}, BASE_DATE)
+
+    assert set(machine.unregistered()) == {-5}
+
+
+@pytest.mark.parametrize("content", ["{nope", "[]", "3"])
+def test_a_corrupt_machine_state_is_an_error_naming_the_file(machine, tmp_path, content):
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "state.json").write_text(content)
+
+    with pytest.raises(BugsError, match="state.json"):
+        machine.load_offset()

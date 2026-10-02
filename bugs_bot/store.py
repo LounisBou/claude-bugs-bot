@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,11 +44,21 @@ class Machine:
         self.unregistered_path = home / "unregistered.json"
 
     def load_offset(self) -> int | None:
-        """Return the next update offset, ``None`` before the first pull."""
+        """Return the next update offset, ``None`` before the first pull.
+
+        Raises:
+            BugsError: If ``state.json`` is unreadable or not a JSON object (never guessed around:
+                a wrong offset would replay or lose messages).
+        """
         try:
-            return json.loads(self.state_path.read_text()).get("offset")
+            state = json.loads(self.state_path.read_text())
         except FileNotFoundError:
             return None
+        except (OSError, ValueError) as exc:
+            raise BugsError(f"cannot read {self.state_path}: {exc}") from None
+        if not isinstance(state, dict):
+            raise BugsError(f"{self.state_path} is not a JSON object")
+        return state.get("offset")
 
     def save_offset(self, offset: int | None) -> None:
         """Write the offset atomically."""
@@ -64,12 +75,26 @@ class Machine:
         write_json(self.unregistered_path, {str(cid): item for cid, item in seen.items()})
 
     def unregistered(self) -> dict[int, dict]:
-        """Return the dropped group chats by chat id, ``{}`` when none was seen."""
+        """Return the dropped group chats by chat id, ``{}`` when none was seen.
+
+        A log that cannot be read is only a list of suggestions for ``init``, and one bad file must
+        not stall Pull for every project: it counts as empty (one line on stderr) and the next
+        sighting rewrites it.
+        """
         try:
             raw = json.loads(self.unregistered_path.read_text())
         except FileNotFoundError:
             return {}
-        return {int(cid): item for cid, item in raw.items()}
+        except (OSError, ValueError) as exc:
+            return self._ignore_unregistered(exc)
+        try:
+            return {int(cid): dict(item) for cid, item in raw.items()}
+        except (AttributeError, TypeError, ValueError) as exc:
+            return self._ignore_unregistered(exc)
+
+    def _ignore_unregistered(self, exc: Exception) -> dict[int, dict]:
+        print(f"bugs-bot: {self.unregistered_path} ignored: {exc}", file=sys.stderr)
+        return {}
 
     def project_store(self, project: str) -> Store:
         """Return the store of one project.
