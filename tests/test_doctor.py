@@ -10,6 +10,7 @@ import pytest
 from samples import TOKEN
 
 from bugs_bot import cli, doctor
+from bugs_bot.errors import BugsError
 from bugs_bot.doctor import LAUNCHER_TEXT, Check, install_launcher, pull_processes, run_checks
 
 PULL_PS = "  4242 python3 /home/u/.claude/plugins/cache/lounisbou/bugs-bot/0.1.0/bin/bugs-bot pull --watch\n"
@@ -309,3 +310,23 @@ def test_cli_doctor_runs_outside_any_project(machine_env, ps, tmp_path, monkeypa
 
     assert cli.main(["doctor"], env=machine_env) == 0
 
+
+
+def test_cli_doctor_reports_an_unreadable_process_table_as_a_failed_check(machine_env, monkeypatch, capsys):
+    def fail():
+        raise BugsError("cannot read the process table: boom")
+
+    monkeypatch.setattr(cli, "read_ps", fail)
+
+    code = cli.main(["doctor"], env=machine_env)
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "FAIL  pull: cannot read the process table: boom" in out
+    assert out.count("ok  ") == 6  # every other check still ran
+
+
+def test_run_checks_takes_the_error_of_a_failed_ps(machine_env):
+    check = by_name(run_checks(machine_env, BugsError("cannot read the process table: boom")))["pull"]
+
+    assert not check.ok and "boom" in check.detail

@@ -194,7 +194,11 @@ def main(
             cmd_pull(TelegramChannel(token, transport), machine, now)
             return 0
         if args.command == "doctor":
-            return cmd_doctor(env, read_ps(), args.install_launcher)
+            try:
+                ps_output = read_ps()
+            except BugsError as exc:
+                ps_output = exc  # a failed check, not an exit: the other checks still tell their story
+            return cmd_doctor(env, ps_output, args.install_launcher)
         if args.command == "init":
             # The bot token is optional here: an explicit --chat-id needs no bot, and Pull may hold the updates.
             try:
@@ -215,7 +219,7 @@ def main(
                 language=args.language,
                 gate_tokens=args.gate_tokens,
             )
-            return cmd_init(channel, machine, repo, given, bool(pull_processes(read_ps())))
+            return cmd_init(channel, machine, repo, given, lambda: bool(pull_processes(read_ps())))
         if args.command == "remove":
             cmd_remove(machine, args.project or _project_of_cwd(machine))
             return 0

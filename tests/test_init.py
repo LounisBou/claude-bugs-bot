@@ -573,6 +573,39 @@ def test_cli_init_while_pull_runs_makes_no_get_updates(run, repo, bugs_home, mon
     assert tg.updates_calls() == []
 
 
+@pytest.fixture
+def broken_ps(monkeypatch):
+    def fail():
+        raise BugsError("cannot read the process table: boom")
+
+    monkeypatch.setattr(cli, "read_ps", fail)
+
+
+def test_cli_init_with_an_explicit_group_never_reads_the_process_table(run, repo, broken_ps, monkeypatch):
+    monkeypatch.chdir(repo)
+
+    code = run("init", "--project", "demo", "--agent-title", "A", "--chat-id", "-5", "--title", "T")
+
+    assert code == 0 and (repo / PROJECT_FILE).is_file()
+
+
+def test_cli_init_rerun_never_reads_the_process_table(run, repo, no_pull, broken_ps, monkeypatch):
+    monkeypatch.chdir(repo)
+    cmd_init(None, Machine(repo.parent / "bugs-bot"), repo, args(), pull_running=False)
+
+    assert run("init") == 0
+
+
+def test_cli_init_discovery_says_when_the_process_table_cannot_be_read(run, repo, bugs_home, broken_ps, monkeypatch, capsys):
+    monkeypatch.chdir(repo)
+
+    code = run("init", "--project", "demo", "--agent-title", "A", transport=FakeTelegram([message(10, 100, text="x")]))
+
+    assert code == 1
+    assert "process table" in capsys.readouterr().err
+    assert not (repo / PROJECT_FILE).exists()
+
+
 def test_cli_init_outside_a_git_repository_is_refused(run, no_pull, capsys):
     assert run("init", "--project", "demo", "--agent-title", "A", "--chat-id", "-5", "--title", "T") == 1
 

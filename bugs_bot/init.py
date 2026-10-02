@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -96,9 +97,12 @@ def discover_groups(channel: Channel | None, machine: Machine, pull_running: boo
     return found
 
 
-def _chosen_group(channel: Channel | None, machine: Machine, name: str, pull_running: bool) -> tuple[int, str] | None:
+def _chosen_group(
+    channel: Channel | None, machine: Machine, name: str, pull_running: bool | Callable[[], bool]
+) -> tuple[int, str] | None:
     """Return the one new group, else say why there is none (or which are there) and return ``None``."""
     held = {cid for cid, entry in machine.registry.entries().items() if entry.project != name}
+    pull_running = pull_running() if callable(pull_running) else pull_running  # asked only now: only a search needs it
     groups = {cid: chat for cid, chat in discover_groups(channel, machine, pull_running).items() if cid not in held}
     if len(groups) == 1:
         (cid, chat), = groups.items()
@@ -114,7 +118,7 @@ def _chosen_group(channel: Channel | None, machine: Machine, name: str, pull_run
     return None
 
 
-def cmd_init(channel: Channel | None, machine: Machine, repo: Path, args: InitArgs, pull_running: bool) -> int:
+def cmd_init(channel: Channel | None, machine: Machine, repo: Path, args: InitArgs, pull_running: bool | Callable[[], bool]) -> int:
     """Write ``repo``'s project file and register it; re-running updates both and never duplicates.
 
     Args:
@@ -122,7 +126,8 @@ def cmd_init(channel: Channel | None, machine: Machine, repo: Path, args: InitAr
         machine: The machine-wide files (registry, unregistered chats).
         repo: The repository the project file goes in.
         args: The command-line values.
-        pull_running: Whether Pull runs, so that the group is looked for without a second poller.
+        pull_running: Whether Pull runs, so that the group is looked for without a second poller; or a
+            function that tells, called only when a group has to be looked for.
 
     Returns:
         0 when written; 1 when no group, or several, was found (they are listed, nothing is written).

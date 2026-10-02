@@ -126,7 +126,9 @@ def _registry(env: Mapping[str, str]) -> Check:
     return Check("registry", True, f"{len(entries)} project(s) registered")
 
 
-def _pull(ps_output: str) -> Check:
+def _pull(ps_output: str | BugsError) -> Check:
+    if isinstance(ps_output, BugsError):
+        return Check("pull", False, str(ps_output))
     pids = pull_processes(ps_output)
     if len(pids) == 1:
         return Check("pull", True, f"running (pid {pids[0]})")
@@ -170,12 +172,13 @@ def _allow_rule(claude: Path) -> Check:
     return Check("allow rule", False, f"{ALLOW_RULE} not allowed{note}: the operator adds it, {PERMISSIONS_LINE}")
 
 
-def run_checks(env: Mapping[str, str], ps_output: str) -> list[Check]:
+def run_checks(env: Mapping[str, str], ps_output: str | BugsError) -> list[Check]:
     """Run every check; nothing is written.
 
     Args:
         env: Environment (the ``BUGS_BOT_*`` overrides place every file the checks read).
-        ps_output: ``ps -eo pid=,command=`` output, so that tests never read the process table.
+        ps_output: ``ps -eo pid=,command=`` output, so that tests never read the process table; the
+            error when it could not be read, which fails the ``pull`` check and nothing else.
     """
     claude = _claude_dir(env)
     return [
@@ -189,7 +192,7 @@ def run_checks(env: Mapping[str, str], ps_output: str) -> list[Check]:
     ]
 
 
-def cmd_doctor(env: Mapping[str, str], ps_output: str, install: bool) -> int:
+def cmd_doctor(env: Mapping[str, str], ps_output: str | BugsError, install: bool) -> int:
     """Print one line per check; return 0 only when all pass.
 
     Args:
