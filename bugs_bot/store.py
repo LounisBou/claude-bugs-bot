@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 from bugs_bot.errors import BugsError
 from bugs_bot.jsonio import write_json
 
-DEFAULT_HOME = Path.home() / ".torrentmate" / "tm-bugs"
+DEFAULT_HOME = Path.home() / ".bugs-bot"
 # Statuses still waiting for a fix, and those that retention may delete.
 OPEN_STATUSES = {"new", "seen", "taken"}
 CLOSED_STATUSES = {"done", "fixed"}
@@ -18,6 +19,11 @@ CLOSED_STATUSES = {"done", "fixed"}
 EMOJI_SEEN = "\U0001f440"  # 👀
 EMOJI_TAKEN = "\U0001f468‍\U0001f4bb"  # 👨‍💻
 EMOJI_FIXED = "\U0001f44c"  # 👌
+
+
+def bugs_home(env: Mapping[str, str]) -> Path:
+    """Return the machine's data directory: ``BUGS_BOT_HOME``, else ``DEFAULT_HOME``."""
+    return Path(env.get("BUGS_BOT_HOME") or DEFAULT_HOME)
 
 
 class Store:

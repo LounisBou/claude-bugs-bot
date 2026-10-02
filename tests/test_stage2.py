@@ -150,7 +150,7 @@ def test_done_with_a_reason_replies_and_does_not_react(run, bound):
 
 def test_done_without_a_reason_needs_no_token(run, bound, env, tmp_path):
     pulled(run, bound)
-    Path(env["TM_BUGS_ENV_FILE"]).unlink()
+    Path(env["BUGS_BOT_ENV_FILE"]).unlink()
 
     assert run("done", FIRST) == 0
 

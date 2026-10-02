@@ -35,7 +35,7 @@ from bugs_bot.reports import (
     cmd_show,
     cmd_taken,
 )
-from bugs_bot.store import DEFAULT_HOME, Store
+from bugs_bot.store import Store, bugs_home
 from bugs_bot.telegram import TelegramChannel, http_transport, mask, read_token
 
 
@@ -135,7 +135,7 @@ def main(
     sleep = sleep or time.sleep
     clock = clock or time.monotonic
     transport = transport or http_transport
-    store = Store(Path(env.get("TM_BUGS_HOME") or DEFAULT_HOME))
+    store = Store(bugs_home(env))
     token = None
     try:
         # Commands that read or write the inbox only, never the network.

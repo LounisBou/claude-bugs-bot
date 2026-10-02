@@ -28,7 +28,7 @@ def env(tmp_path: Path, home: Path) -> dict[str, str]:
     """Return an environment pointing the script at a fake token and inbox."""
     env_file = tmp_path / ".env"
     env_file.write_text(f"OTHER=1\nTELEGRAM_BOT_TOKEN={TOKEN}\nTELEGRAM_CHAT_ID=5\n")
-    return {"TM_BUGS_ENV_FILE": str(env_file), "TM_BUGS_HOME": str(home)}
+    return {"BUGS_BOT_ENV_FILE": str(env_file), "BUGS_BOT_HOME": str(home)}
 
 
 @pytest.fixture

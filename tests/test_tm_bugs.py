@@ -623,4 +623,4 @@ def test_unknown_command_exits_non_zero():
 
 
 def test_default_state_dir_is_the_torrentmate_inbox():
-    assert str(store.DEFAULT_HOME).endswith(".torrentmate/tm-bugs")
+    assert str(store.DEFAULT_HOME).endswith(".bugs-bot")
