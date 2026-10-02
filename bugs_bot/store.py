@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 
 from bugs_bot.errors import BugsError
 from bugs_bot.jsonio import write_json
+from bugs_bot.project import PROJECT_ID
+from bugs_bot.registry import Registry
 
 DEFAULT_HOME = Path.home() / ".bugs-bot"
 # Statuses still waiting for a fix, and those that retention may delete.
@@ -24,6 +27,59 @@ EMOJI_FIXED = "\U0001f44c"  # 👌
 def bugs_home(env: Mapping[str, str]) -> Path:
     """Return the machine's data directory: ``BUGS_BOT_HOME``, else ``DEFAULT_HOME``."""
     return Path(env.get("BUGS_BOT_HOME") or DEFAULT_HOME)
+
+
+class Machine:
+    """The machine-wide files of the bugs home, shared by every project.
+
+    ``state.json`` holds the update offset (one consumer per bot, so one per machine),
+    ``projects.json`` the registry, ``unregistered.json`` the group chats Pull dropped.
+    """
+
+    def __init__(self, home: Path) -> None:
+        self.home = home
+        self.registry = Registry(home / "projects.json")
+        self.state_path = home / "state.json"
+        self.unregistered_path = home / "unregistered.json"
+
+    def load_offset(self) -> int | None:
+        """Return the next update offset, ``None`` before the first pull."""
+        try:
+            return json.loads(self.state_path.read_text()).get("offset")
+        except FileNotFoundError:
+            return None
+
+    def save_offset(self, offset: int | None) -> None:
+        """Write the offset atomically."""
+        write_json(self.state_path, {"offset": offset})
+
+    def note_unregistered(self, chat: dict, now: float) -> None:
+        """Record a group chat Pull dropped, so that ``init`` can offer it; the latest sighting wins."""
+        seen = self.unregistered()
+        seen[chat["id"]] = {
+            "title": chat.get("title") or "",
+            "type": chat.get("type") or "",
+            "last_seen": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+        }
+        write_json(self.unregistered_path, {str(cid): item for cid, item in seen.items()})
+
+    def unregistered(self) -> dict[int, dict]:
+        """Return the dropped group chats by chat id, ``{}`` when none was seen."""
+        try:
+            raw = json.loads(self.unregistered_path.read_text())
+        except FileNotFoundError:
+            return {}
+        return {int(cid): item for cid, item in raw.items()}
+
+    def project_store(self, project: str) -> Store:
+        """Return the store of one project.
+
+        Raises:
+            BugsError: If the id is not ``[a-z0-9-]+``: it is a directory name and must not leave the home.
+        """
+        if not PROJECT_ID.fullmatch(project):
+            raise BugsError(f"project must match [a-z0-9-]+, got {project!r}")
+        return Store(self.home / project)
 
 
 class Store:
