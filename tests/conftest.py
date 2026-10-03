@@ -28,6 +28,12 @@ def _outside_any_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.chdir(cwd)
 
 
+@pytest.fixture(autouse=True)
+def _no_pm2(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never ask the real PM2: ``doctor`` reads its process list through ``cli.read_pm2``, absent here."""
+    monkeypatch.setattr(cli, "read_pm2", lambda: None)
+
+
 @pytest.fixture
 def bugs_home(tmp_path: Path) -> Path:
     """Return the machine's data directory used by the tests (never the real one)."""

@@ -27,6 +27,9 @@ SETTINGS_FILES = ("settings.json", "settings.local.json")
 # Interpreter options that take the next word as their argument (``-X dev``), and those that replace the script.
 OPTIONS_WITH_ARGUMENT = {"-X", "-W"}
 PROGRAM_OPTIONS = {"-c", "-m"}
+PULL_APP = "bugs-bot-pull"
+# Where the host unpacks each plugin version: a path in it is gone once an update prunes that version.
+VERSIONED_DIR = "plugins/cache/"
 
 # What every session runs as ``bugs-bot``: the newest installed version of the plugin's CLI. The newest
 # directory is chosen first and only then checked for its CLI, so a half-removed version is refused
@@ -153,11 +156,29 @@ def _registry(env: Mapping[str, str]) -> Check:
     return Check("registry", True, f"{len(entries)} project(s) registered")
 
 
-def _pull(ps_output: str | BugsError) -> Check:
+def _pm2_script(jlist: str | None) -> str | None:
+    """Return the script PM2 recorded for ``bugs-bot-pull`` in ``pm2 jlist`` output; ``None`` when unknown."""
+    try:
+        for app in json.loads(jlist or ""):
+            if app.get("name") == PULL_APP:
+                return app["pm2_env"]["pm_exec_path"]
+    except (ValueError, TypeError, KeyError, AttributeError):
+        pass
+    return None
+
+
+def _pull(ps_output: str | BugsError, pm2_jlist: str | None = None) -> Check:
     if isinstance(ps_output, BugsError):
         return Check("pull", False, str(ps_output))
     pids = pull_processes(ps_output)
     if len(pids) == 1:
+        script = _pm2_script(pm2_jlist)
+        if isinstance(script, str) and VERSIONED_DIR in Path(script).as_posix():
+            return Check(
+                "pull",
+                False,
+                f"PM2 runs a versioned path: `pm2 delete {PULL_APP}`, then `pm2 start <plugin>/pm2.config.js && pm2 save`",
+            )
         return Check("pull", True, f"running (pid {pids[0]})")
     if not pids:
         return Check("pull", False, "not running: start it with PM2 (bugs-bot-pull)")
@@ -199,7 +220,9 @@ def _allow_rule(claude: Path) -> Check:
     return Check("allow rule", False, f"{ALLOW_RULE} not allowed{note}: the operator adds it, {PERMISSIONS_LINE}")
 
 
-def run_checks(env: Mapping[str, str], ps_output: str | BugsError, transport: Transport | None = None) -> list[Check]:
+def run_checks(
+    env: Mapping[str, str], ps_output: str | BugsError, transport: Transport | None = None, pm2_jlist: str | None = None
+) -> list[Check]:
     """Run every check; nothing is written.
 
     Args:
@@ -207,6 +230,8 @@ def run_checks(env: Mapping[str, str], ps_output: str | BugsError, transport: Tr
         ps_output: ``ps -eo pid=,command=`` output, so that tests never read the process table; the
             error when it could not be read, which fails the ``pull`` check and nothing else.
         transport: To ask each platform with a registered project who the bot is; ``None`` asks none.
+        pm2_jlist: ``pm2 jlist`` output, to fail a Pull that PM2 runs from a versioned path; ``None`` when
+            PM2 is absent or unreadable, which leaves the ``pull`` verdict as the process table gives it.
     """
     claude = _claude_dir(env)
     registered = {kind for kind, _ in _entries(env)}
@@ -219,14 +244,20 @@ def run_checks(env: Mapping[str, str], ps_output: str | BugsError, transport: Tr
         _python(),
         *tokens,
         _registry(env),
-        _pull(ps_output),
+        _pull(ps_output, pm2_jlist),
         _orchestrator(claude),
         _launcher(_launcher_dir(env)),
         _allow_rule(claude),
     ]
 
 
-def cmd_doctor(env: Mapping[str, str], ps_output: str | BugsError, install: bool, transport: Transport | None = None) -> int:
+def cmd_doctor(
+    env: Mapping[str, str],
+    ps_output: str | BugsError,
+    install: bool,
+    transport: Transport | None = None,
+    pm2_jlist: str | None = None,
+) -> int:
     """Print one line per check; return 0 only when all pass.
 
     Args:
@@ -234,10 +265,11 @@ def cmd_doctor(env: Mapping[str, str], ps_output: str | BugsError, install: bool
         ps_output: The process table, as ``run_checks`` takes it.
         install: Install the launcher first (the first run, when it does not exist yet).
         transport: To ask each platform with a registered project who the bot is.
+        pm2_jlist: PM2's process list, as ``run_checks`` takes it.
     """
     if install:
         print(f"installed {install_launcher(_launcher_dir(env))}")
-    checks = run_checks(env, ps_output, transport)
+    checks = run_checks(env, ps_output, transport, pm2_jlist)
     for check in checks:
         print(f"{'ok  ' if check.ok else 'FAIL'}  {check.name}: {check.detail}")
     return 0 if all(check.ok for check in checks) else 1

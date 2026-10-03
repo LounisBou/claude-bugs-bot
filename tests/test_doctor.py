@@ -127,6 +127,47 @@ def test_pull_runs_exactly_once(machine_env, ps, ok):
         assert "4242" in check.detail and "4243" in check.detail
 
 
+def jlist(path: str, name: str = "bugs-bot-pull") -> str:
+    """Recorded ``pm2 jlist`` output: one process, with the script PM2 recorded for it."""
+    return json.dumps([{"name": "other", "pm2_env": {"pm_exec_path": "/srv/other.js"}}, {"name": name, "pm2_env": {"pm_exec_path": path}}])
+
+
+VERSIONED = "/home/u/.claude/plugins/cache/lounisbou/bugs-bot/0.1.0/bin/bugs-bot"
+
+
+def test_pull_fails_when_pm2_recorded_a_versioned_path(machine_env):
+    check = by_name(run_checks(machine_env, PULL_PS, pm2_jlist=jlist(VERSIONED)))["pull"]
+
+    assert not check.ok
+    assert "PM2 runs a versioned path" in check.detail
+    assert "pm2 delete bugs-bot-pull" in check.detail and "pm2 start <plugin>/pm2.config.js && pm2 save" in check.detail
+
+
+def test_pull_passes_when_pm2_recorded_the_launcher(machine_env):
+    check = by_name(run_checks(machine_env, PULL_PS, pm2_jlist=jlist("/home/u/.local/bin/bugs-bot")))["pull"]
+
+    assert check.ok and "4242" in check.detail
+
+
+@pytest.mark.parametrize("recorded", [None, "", "not json", "{}", "[1, 2]", '[{"name": "bugs-bot-pull"}]', jlist(VERSIONED, name="other")])
+def test_pull_keeps_its_verdict_when_pm2_is_absent_or_unreadable(machine_env, recorded):
+    assert by_name(run_checks(machine_env, PULL_PS, pm2_jlist=recorded))["pull"].ok
+
+
+def test_pull_reads_pm2_only_when_exactly_one_pull_runs(machine_env):
+    check = by_name(run_checks(machine_env, "", pm2_jlist=jlist(VERSIONED)))["pull"]
+
+    assert not check.ok and "not running" in check.detail
+
+
+def test_cli_doctor_reports_the_versioned_path_pm2_recorded(machine_env, ps, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "read_pm2", lambda: jlist(VERSIONED))
+
+    code = cli.main(["doctor"], env=machine_env)
+
+    assert code == 1 and "FAIL  pull: PM2 runs a versioned path" in capsys.readouterr().out
+
+
 def test_orchestrator_check(machine_env, tmp_path):
     (tmp_path / "claude" / "plugins" / "cache" / "lounisbou" / "orchestrator" / "0.38.0").rmdir()
 
