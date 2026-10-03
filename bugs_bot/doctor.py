@@ -31,11 +31,12 @@ PROGRAM_OPTIONS = {"-c", "-m"}
 # What every session runs as ``bugs-bot``: the newest installed version of the plugin's CLI. The newest
 # directory is chosen first and only then checked for its CLI, so a half-removed version is refused
 # instead of letting an older one run silently. ``sort -V`` orders 0.10.0 after 0.2.0 (BSD sort on macOS has it).
+# ``BUGS_BOT_PYTHON`` picks the interpreter (a pyenv binary, not its shim), as PM2 passes it through its ``env``.
 LAUNCHER_MARKER = "# bugs-bot launcher: installed by `bugs-bot doctor --install-launcher`"
 LAUNCHER_TEXT = "#!/bin/sh\n" + LAUNCHER_MARKER + """
 d=$(ls -d "${BUGS_BOT_CLAUDE_DIR:-$HOME/.claude}"/plugins/cache/lounisbou/bugs-bot/*/ 2>/dev/null | sort -V | tail -1)
 [ -n "$d" ] && [ -f "${d}bin/bugs-bot" ] || { echo "bugs-bot: no installed version found — run /bugs-bot:doctor" >&2; exit 127; }
-exec python3 "${d}bin/bugs-bot" "$@"
+exec "${BUGS_BOT_PYTHON:-python3}" "${d}bin/bugs-bot" "$@"
 """
 
 
