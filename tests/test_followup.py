@@ -406,3 +406,10 @@ def test_the_agent_is_told_the_ceiling_and_the_timeout_to_pass():
     assert "prints nothing after 7000 seconds" in text
     assert "timeout of 7200000" in text
     assert "30 minutes" not in text
+
+
+def test_a_launcher_message_does_not_arm_a_second_wait():
+    text = AGENT_MD.read_text()
+
+    assert "A launcher message does not end your wait" in text
+    assert "never arm another" in text
