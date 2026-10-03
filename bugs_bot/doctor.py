@@ -28,8 +28,9 @@ SETTINGS_FILES = ("settings.json", "settings.local.json")
 OPTIONS_WITH_ARGUMENT = {"-X", "-W"}
 PROGRAM_OPTIONS = {"-c", "-m"}
 PULL_APP = "bugs-bot-pull"
-# Where the host unpacks each plugin version: a path in it is gone once an update prunes that version.
-VERSIONED_DIR = "plugins/cache/"
+# Where the host unpacks each version of this plugin (the launcher's own glob): a path in it is gone once an
+# update prunes that version.
+VERSIONED_DIR = "/plugins/cache/lounisbou/bugs-bot/"
 
 # What every session runs as ``bugs-bot``: the newest installed version of the plugin's CLI. The newest
 # directory is chosen first and only then checked for its CLI, so a half-removed version is refused
@@ -157,9 +158,17 @@ def _registry(env: Mapping[str, str]) -> Check:
 
 
 def _pm2_script(jlist: str | None) -> str | None:
-    """Return the script PM2 recorded for ``bugs-bot-pull`` in ``pm2 jlist`` output; ``None`` when unknown."""
+    """Return the script PM2 recorded for ``bugs-bot-pull`` in ``pm2 jlist`` output; ``None`` when unknown.
+
+    With no daemon up, PM2 prints ``[PM2] Spawning PM2 daemon …`` lines before the JSON array: it starts at
+    the first line that begins with ``[`` (the preamble's own lines begin with ``[PM2]``, then a space).
+    """
+    lines = (jlist or "").splitlines()
+    start = next((i for i, line in enumerate(lines) if line.startswith("[") and not line.startswith("[PM2]")), None)
+    if start is None:
+        return None
     try:
-        for app in json.loads(jlist or ""):
+        for app in json.loads("\n".join(lines[start:])):
             if app.get("name") == PULL_APP:
                 return app["pm2_env"]["pm_exec_path"]
     except (ValueError, TypeError, KeyError, AttributeError):
@@ -171,14 +180,19 @@ def _pull(ps_output: str | BugsError, pm2_jlist: str | None = None) -> Check:
     if isinstance(ps_output, BugsError):
         return Check("pull", False, str(ps_output))
     pids = pull_processes(ps_output)
-    if len(pids) == 1:
+    if len(pids) <= 1:
+        # A pruned version leaves no Pull running at all: PM2's restart found no script. Read what PM2 recorded
+        # either way, so « start it with PM2 » is not the remedy given for that.
         script = _pm2_script(pm2_jlist)
         if isinstance(script, str) and VERSIONED_DIR in Path(script).as_posix():
             return Check(
                 "pull",
                 False,
-                f"PM2 runs a versioned path: `pm2 delete {PULL_APP}`, then `pm2 start <plugin>/pm2.config.js && pm2 save`",
+                f"PM2 recorded a versioned path for {PULL_APP}: {script}; run `bugs-bot doctor --install-launcher`, "
+                f"`pm2 delete {PULL_APP}`, then "
+                "`BUGS_BOT_PYTHON=<python 3.10+> pm2 start <plugin>/pm2.config.js && pm2 save`",
             )
+    if len(pids) == 1:
         return Check("pull", True, f"running (pid {pids[0]})")
     if not pids:
         return Check("pull", False, "not running: start it with PM2 (bugs-bot-pull)")

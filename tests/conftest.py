@@ -29,9 +29,14 @@ def _outside_any_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.fixture(autouse=True)
-def _no_pm2(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Never ask the real PM2: ``doctor`` reads its process list through ``cli.read_pm2``, absent here."""
+def _no_pm2(monkeypatch: pytest.MonkeyPatch):
+    """Never ask the real PM2: ``doctor`` reads its process list through ``cli.read_pm2``, absent here.
+
+    Returns the real ``read_pm2``, for the one test that drives it through a fake ``subprocess.run``.
+    """
+    real = cli.read_pm2
     monkeypatch.setattr(cli, "read_pm2", lambda: None)
+    return real
 
 
 @pytest.fixture

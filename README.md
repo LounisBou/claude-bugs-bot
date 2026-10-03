@@ -45,6 +45,9 @@ break the saved process.
 pm2 start <plugin directory>/pm2.config.js && pm2 save
 ```
 
+Without the launcher, `pm2 start` answers « Script not found » and registers nothing; `bugs-bot doctor`'s
+`launcher` check names it.
+
 The launcher runs `python3` from PM2's `PATH`; set `BUGS_BOT_PYTHON` to an interpreter (3.10 or newer,
 the pyenv binary itself rather than its shim) before the `pm2 start` to choose another.
 
