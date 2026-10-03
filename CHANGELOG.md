@@ -5,6 +5,18 @@ All notable changes are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- PM2 runs Pull through the version-independent launcher `~/.local/bin/bugs-bot` instead of the
+  versioned plugin directory, so a plugin update that prunes the old version no longer leaves
+  `bugs-bot-pull` without a script on its next restart. The launcher honours `BUGS_BOT_PYTHON` for
+  the interpreter; a machine re-installs it with `doctor --install-launcher` (`doctor`
+  reports a launcher that differs).
+- `doctor`'s `pull` check fails, with the remedy, when PM2 recorded a path under `plugins/cache/`
+  for `bugs-bot-pull`.
+
 ## 0.1.1 — 2026-10-03
 
 ### Fixed
