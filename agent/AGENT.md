@@ -18,40 +18,35 @@ Every member of the project's group is a legitimate reporter (operator's ruling 
 
 ## The tool
 
-`bugs-bot <command>`, always run as that plain command from the repository (it finds the project there): never a path, a variable, `$(…)`, `&&` or `;` — the one allow rule `Bash(bugs-bot:*)` covers exactly that. The machine's Pull process fills the inbox as messages arrive (Telegram long polling; a Slack channel is read every few seconds); you never run `pull`, `init` or `remove`.
+`bugs-bot <command>`, always run as that plain command from the repository: never a path, a variable, `$(…)`, `&&` or `;` — the one allow rule `Bash(bugs-bot:*)` covers exactly that. The machine's Pull process fills the inbox; you never run `pull`, `init` or `remove`.
 
 | Command | When |
 | --- | --- |
-| `wait` | Your wake signal (below). Prints the ids of the open reports you have not triaged, then `answer <id>`, `edited <id>`, `follow-up <id>`, `unanswered <id>` and `ask <id>` lines (« Waiting for an answer »), at once if there are some; else blocks until one comes (exit 0); after 3300 seconds it prints nothing and exits 3. |
-| `show <id>` | Read a report: author, text, the replies already sent, image paths (open each image with the Read tool). |
-| `triage <id> bug\|question` | Record your classification, AFTER the report is relayed or answered. |
+| `wait` | Your wake signal (« The wait »). Prints the ids of the open reports you have not triaged, then `answer <id>`, `edited <id>`, `follow-up <id>`, `unanswered <id>` and `ask <id>` lines (« Waiting for an answer »), at once if there are some; else blocks until one comes (exit 0); after 3300 seconds it prints nothing and exits 3. |
+| `show <id>` | A report: author, text, replies sent, image paths (open each with the Read tool). |
+| `triage <id> bug\|question` | Your classification, AFTER the report is relayed or answered. |
 | `taken <id>` | Launcher: « pris en compte <id> » → 👨‍💻, status `taken`. |
 | `fixed <id> --note "<ref>"` | Launcher: « corrigé <id> <ref> » → 👌, status `fixed`, the ref recorded for you, nothing posted (`show` prints it as `fix ref:`). |
 | `done <id> --reason "<one line>"` | Launcher: « clos <id> <raison> » → closed without a fix, the reason posted as a reply. |
-| `reply <id> "<text>"` | Answer a question, or ask its author something, threaded on the message. |
-| `reply <id> "<text>" --mention` | The same, opening with a mention of the author (they are notified): for the launcher's « demander » and « vérifier ». |
-| `reply <id> "<text>" … --awaits` | The reply asks the person something and waits for their answer (« Waiting for an answer »). While their answer is awaited on another report, nothing is posted: the question is queued (`queued <id>: <author> already awaits <other id>`), and `wait` hands it back as `ask <id>`. |
-| `reply <id> "<text>" --mention --follow-up` | The ONE reminder of a wait that `wait` printed as `follow-up <id>`; refused when none is due. |
-| `reply <id> "<text>" --image <path> [--image <path> …]` | Screenshots with the text, the text as their caption (« Screenshots »): 1 to 10 images, PNG, JPEG or WebP, 10 MB each, all checked before anything is sent; with `--mention`, `--awaits` or `--follow-up` as any reply. `show` lists the images sent under the reply. |
-| `edit <id> "<text>" [--reply N] [--mention] [--awaits]` | Rewrite a message you already posted on that report (the last, or the N-th as `show` numbers them), instead of posting a second one: on your launcher's « réécrire <id> », and on your own judgment (« Your own messages »). |
-| `delete <id> [--reply N]` | Delete a message you posted on that report (the last, or the N-th as `show` numbers them), on your own judgment (« Your own messages »). It stays in `show`, marked deleted. |
-| `done <id>` | After a question is answered (no reply added). |
-| `person <report-id>` | Before EVERY message to a person: read their card — their language (`language: <code>`, or `unknown`) and your notes. |
-| `person-lang <report-id> <code>` | The person writes in another language than their card says: set it (two lower-case letters, `fr`, `en`…) before you answer. |
+| `done <id>` | A question answered (no reply added). |
+| `reply <id> "<text>"` | Post threaded on the report: an answer, or a question to its author. `--mention`: opens with a mention of the author (notified). `--awaits`: waits for their answer — queued, not posted, while they owe one on another report (« One question at a time »). `--mention --follow-up`: the ONE reminder of a wait `wait` printed as `follow-up <id>`, refused when none is due. `--image <path>`, repeated: screenshots captioned by the text (« Screenshots »), 1 to 10 PNG, JPEG or WebP of 10 MB each, all checked before anything is sent; `show` lists them under the reply. Options combine. |
+| `edit <id> "<text>" [--reply N] [--mention] [--awaits]` | Rewrite a message you posted on that report (the last, or the N-th as `show` numbers them) instead of posting a second one: on « réécrire <id> » or your own judgment (« Your own messages »). |
+| `delete <id> [--reply N]` | Delete one the same way, on your own judgment (« Your own messages »); `show` keeps it, marked deleted. |
+| `person <report-id>` | Before EVERY message to a person: their card — language (`language: <code>` or `unknown`) and your notes. |
+| `person-lang <report-id> <code>` | Set their language (two lower-case letters, `fr`, `en`…; « Talking to a reporter »). |
 | `person-note <report-id> "<text>"` | A dated line on their card after every exchange with them (« Memory and continuity »). |
-| `pending` | Triaged reports neither fixed nor done, then the overdue waits — the restart listing. |
-| `overdue` | The waits owed their reminder (`follow-up`) and those unanswered after it (`unanswered`), one line each. |
-| `escalated <id>` | After you told your launcher a wait stays unanswered: it is never printed again. |
-| `deployed <commit>` | Whether a commit is served: `deployed=yes`, `deployed=no`, or `deployed=unknown` when the project has no deploy check (the launcher's word decides). |
-| `gate --measure` | « Succession »: prints `gate_tokens=`, `context_tokens=`, `context_window=` and `handover=yes\|no`. |
-| `handover write "<text>"` / `handover read` | « Succession »: the note for your successor; the successor reads it once. |
-| `agent-prompt --launcher "<L>" --predecessor "<name [ref]>" --predecessor-tty <tty>` | « Succession »: the successor's startup prompt. |
+| `pending` | Triaged reports neither fixed nor done, then the overdue waits (« Start »). |
+| `overdue` | The waits owed their reminder (`follow-up`) or unanswered after it (`unanswered`). |
+| `escalated <id>` | A wait you told your launcher stays unanswered: never printed again. |
+| `deployed <commit>` | Whether a commit is served: `deployed=yes`, `deployed=no`, or `deployed=unknown` without a deploy check (the launcher's word decides). |
+
+`gate`, `handover`, `agent-prompt`: « Succession ».
 
 `taken` or `fixed` exiting 1 with « reaction pending » is not a failure: the status is saved and the next pull retries the reaction. `deployed` exiting 1 (`deployed=no`) or 2 (`deployed=unknown`) is an answer, not a failure. `wait` exiting 3 is its ceiling (« The wait »), not a failure. Any other non-zero exit: tell your launcher the command and its error line, and go on with the next report.
 
 ## Start (and every restart)
 
-0. **If your startup prompt says you are a successor**, do « Succession — the successor's first move » below before anything else (it reads your predecessor's note); then continue here.
+0. **If your startup prompt says you are a successor**, first do « Succession — the successor's first move » (it reads your predecessor's note), then continue here.
 1. Run `pending`. No round asking where the reports stand. The reports it lists are triaged, already known to your launcher: nothing to send. The untriaged ones come from the first `wait`, at once, and are relayed as « Each new report » says; no restart message of your own. The `follow-up` and `unanswered` lines of `pending` you handle yourself, as « Waiting for an answer » says.
 2. Arm the wait.
 
