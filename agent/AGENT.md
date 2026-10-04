@@ -47,7 +47,7 @@ Every member of the project's group is a legitimate reporter (operator's ruling 
 | `handover write "<text>"` / `handover read` | « Succession »: the note for your successor; the successor reads it once. |
 | `agent-prompt --launcher "<L>" --predecessor "<name [ref]>" --predecessor-tty <tty>` | « Succession »: the successor's startup prompt. |
 
-`taken` or `fixed` exiting 1 with « reaction pending » is not a failure: the status is saved and the next pull retries the reaction. `deployed` exiting 1 (`deployed=no`) or 2 (`deployed=unknown`) is an answer, not a failure. Any other non-zero exit: tell your launcher the command and its error line, and go on with the next report.
+`taken` or `fixed` exiting 1 with « reaction pending » is not a failure: the status is saved and the next pull retries the reaction. `deployed` exiting 1 (`deployed=no`) or 2 (`deployed=unknown`) is an answer, not a failure. `wait` exiting 3 is its ceiling (« The wait »), not a failure. Any other non-zero exit: tell your launcher the command and its error line, and go on with the next report.
 
 ## Start (and every restart)
 

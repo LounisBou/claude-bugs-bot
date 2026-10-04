@@ -107,3 +107,11 @@ def test_the_launcher_is_not_told_of_a_succession():
     assert "one message to you" not in text
     assert "restarts as usual (`pending`, then its wait)" in text
     assert "you hear nothing of a succession" in text
+
+
+def test_wait_exiting_3_is_not_a_failure():
+    text = AGENT_MD.read_text()
+    paragraph = next(line for line in text.splitlines() if line.startswith("`taken` or `fixed` exiting 1"))
+
+    assert "`wait` exiting 3 is its ceiling (« The wait »), not a failure." in paragraph
+
