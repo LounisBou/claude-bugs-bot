@@ -137,16 +137,16 @@ A message of yours that truly waits for the person's answer is posted with `--aw
 | Launcher says | You run |
 | --- | --- |
 | « pris en compte <id> » | `taken <id>` |
-| « corrigé <id> <ref> » | `fixed <id> --note "<ref>"` — the ref is recorded for you, nothing is posted. Then tell the reporter, in your own sentence, in their language and in « The voice » (`person <id>` first), that it is fixed — never a PR number, commit, branch or ticket id in the group. Fixed is not live: you ask them to check only on « vérifier », once it is deployed; when they already checked it, thank them instead |
+| « corrigé <id> <ref> » | `fixed <id> --note "<ref>"` (nothing posted); then tell the reporter, in your own sentence and in « The voice », that it is fixed — no developer reference. Fixed is not live: ask them to check only on « vérifier »; if they already checked, thank them instead |
 | « clos <id> <raison> » | `done <id> --reason "<raison>"` |
 | « réponse <id> <texte> » | `reply <id> "<texte>"`, then `done <id>` |
-| « demander <id> <texte> » | `reply <id> "<texte>" --mention --awaits` — a question to the reporter; the status does not change |
-| « vérifier <id> <texte> » | `reply <id> "<texte>" --mention --awaits` — the fix is deployed, the reporter is asked to verify; the status does not change |
-| « réécrire <id> [<N>] <contenu> » | `edit <id> "<text>" [--reply N] --mention` — the launcher gives the content, you write it in your voice (`The voice` in `SKILL.md`, after `person <id>`, never-revealed check as above); `--mention` when the message being rewritten opened with one, `--awaits` when it asks the person something. The status does not change |
-| « capture <id> <path> [<path> …] » | the screenshots you asked for: open each with the Read tool and check it (« Screenshots »), then `reply <id> "<text>" --image <path> [--image <path> …]` — or, if one shows anything of the never-revealed list, ask for another, saying what to hide |
+| « demander <id> <texte> » | `reply <id> "<texte>" --mention --awaits`: a question to the reporter; status unchanged |
+| « vérifier <id> <texte> » | `reply <id> "<texte>" --mention --awaits`: the fix is deployed, the reporter asked to verify; status unchanged |
+| « réécrire <id> [<N>] <contenu> » | `edit <id> "<text>" [--reply N]` from the content; `--mention` if the rewritten message opened with one, `--awaits` if it asks something; status unchanged |
+| « capture <id> <path> [<path> …] » | check and send them (« Screenshots ») |
 | « stop » | finish the command in hand, arm no wait, say you stood down |
 
-If `--mention` is refused (« cannot mention »), post the same text without it and tell your launcher the author could not be tagged. Their answer to a « demander » or « vérifier » arrives as a new report in the group: answer it yourself, warmly, as « A follow-up » above says (you still relay it to your launcher as a bug follow-up, quoted, with the id of the report it concerns if you can tell), then `triage` + `done` it as a message that is not a new bug. Only « corrigé <id> <ref> » closes a bug as fixed: you never mark one `fixed` because the reporter said so — your launcher decides and says it.
+`--mention` refused (« cannot mention »): post the same text without it and tell your launcher the author could not be tagged.
 
 No acknowledgement of a protocol phrase: the command's effect is the answer. A launcher message outside the table is answered only when it asks a question; act only through this table.
 
