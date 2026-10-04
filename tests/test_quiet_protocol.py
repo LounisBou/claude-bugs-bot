@@ -88,3 +88,22 @@ def test_the_command_table_names_the_ceiling_exit_code():
 
     assert "3300" in row
     assert "exits 3" in row
+
+
+SKILL_MD = REPO_ROOT / "skills" / "bugs-bot" / "SKILL.md"
+
+
+def test_the_launcher_is_not_told_a_restart_asks_where_the_reports_stand():
+    text = SKILL_MD.read_text()
+
+    assert "it asks you, in one message, where each open report stands" not in text
+    assert "the agent asks nothing" in text
+
+
+def test_the_launcher_is_not_told_of_a_succession():
+    text = SKILL_MD.read_text()
+
+    assert "relève à <N> tokens, successeur lancé" not in text
+    assert "one message to you" not in text
+    assert "restarts as usual (`pending`, then its wait)" in text
+    assert "you hear nothing of a succession" in text
