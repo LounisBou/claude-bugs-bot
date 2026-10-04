@@ -397,15 +397,17 @@ def test_an_empty_exit_costs_no_words_and_measures_nothing():
 
     assert "measure then, too" not in text
     assert "at least every hour of waiting" not in text
-    assert "On an empty exit, re-arm at once, with no text" in text
+    assert "On exit code 3, re-arm at once with one tool call: no read of the output, no text, no measure" in text
     assert "never on an empty exit" in text
 
 
 def test_the_agent_is_told_the_ceiling_and_the_timeout_to_pass():
     text = AGENT_MD.read_text()
 
-    assert "prints nothing after 7000 seconds" in text
-    assert "timeout of 7200000" in text
+    assert "after 3300 seconds it prints nothing and exits 3" in text
+    assert "timeout of 3600000" in text
+    assert "7000" not in text
+    assert "7200000" not in text
     assert "30 minutes" not in text
 
 

@@ -229,7 +229,7 @@ def test_wait_blocks_until_a_report_lands(run, run2, bound, capsys):
 def test_wait_gives_up_at_its_ceiling_printing_nothing(run2, bound, capsys):
     sleep = FakeSleep()
 
-    assert run2("wait", "--timeout", "60", "--interval", "5", sleep=sleep) == WAIT_TIMED_OUT
+    assert run2("wait", "--timeout", "60", "--interval", "5", sleep=sleep) == 3
 
     assert capsys.readouterr().out == ""
     assert sum(sleep.calls) == 60
