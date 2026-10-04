@@ -115,3 +115,10 @@ def test_wait_exiting_3_is_not_a_failure():
 
     assert "`wait` exiting 3 is its ceiling (« The wait »), not a failure." in paragraph
 
+
+
+def test_the_call_timeout_is_above_the_ceiling_and_not_called_under_the_lifetime():
+    wait = section("The wait")
+
+    assert "Give the call a timeout of 3600000 ms, above the ceiling:" in wait
+    assert "and under that lifetime" not in wait
