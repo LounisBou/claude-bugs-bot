@@ -10,8 +10,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - The agent writes to its launcher only to bring it information: no acknowledgement of a protocol
-  phrase, no « where does each stand » round on restart (only the reports never relayed are sent,
-  in full), no launcher confirmation round, no handover line to the launcher (the
+  phrase, no « where does each stand » round on restart (the reports never relayed are
+  relayed as new reports by the first wait, as « Each new report » says), no launcher confirmation round, no handover line to the launcher (the
   predecessor–successor exchange stays). A launcher message outside the protocol table is answered
   only when it asks a question.
 - `bugs-bot wait` has a ceiling of 3300 seconds, under the host's one-hour prompt-cache lifetime

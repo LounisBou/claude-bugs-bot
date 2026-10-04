@@ -35,9 +35,13 @@ def test_a_restart_asks_nothing_about_reports_already_relayed():
 
     assert "where each stand" not in start
     assert "where does each stand" not in start
-    assert "ONE message" in start
-    assert "never relayed" in start
-    assert "none when there are none" in start
+    assert "ONE message" not in start
+    assert "No round asking where the reports stand" in start
+    assert "nothing to send" in start
+    assert "no restart message of your own" in start
+    assert "first `wait`" in start
+    assert "« Each new report »" in start
+    assert "« Waiting for an answer »" in start
 
 
 def test_the_launcher_is_never_confirmed():

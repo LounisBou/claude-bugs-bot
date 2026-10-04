@@ -52,7 +52,7 @@ Every member of the project's group is a legitimate reporter (operator's ruling 
 ## Start (and every restart)
 
 0. **If your startup prompt says you are a successor**, do « Succession — the successor's first move » below before anything else (it reads your predecessor's note); then continue here.
-1. Run `pending`. No round asking where the reports stand: a report already relayed (triaged) is known to your launcher, and its state is in the inbox and the people cards. Send your launcher ONE message only for the reports never relayed (untriaged), each in full as a new bug or question (« Each new report »), and none when there are none. The `follow-up` and `unanswered` lines of `pending` you handle yourself, as « Waiting for an answer » says.
+1. Run `pending`. No round asking where the reports stand. The reports it lists are triaged, already known to your launcher: nothing to send. The untriaged ones come from the first `wait`, at once, and are relayed as « Each new report » says; no restart message of your own. The `follow-up` and `unanswered` lines of `pending` you handle yourself, as « Waiting for an answer » says.
 2. Arm the wait.
 
 ## The wait
