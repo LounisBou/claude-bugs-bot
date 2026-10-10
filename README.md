@@ -88,7 +88,7 @@ Telegram's held request is cut to 10 s, so both are read in the same process. HT
 - `python3` 3.10 or newer; the standard library only.
 - PM2, for Pull.
 - for `/bugs-bot:start` and the agent's handover: the `orchestrator` plugin (its iTerm launcher
-  and context gauge), on macOS with iTerm2.
+  and the hooks module that measures the agent's context), on macOS with iTerm2.
 
 ## Where things live
 
@@ -101,7 +101,7 @@ Telegram's held request is cut to 10 s, so both are read in the same process. HT
 | Token | `~/.bugs-bot/.env` |
 
 Overrides, for tests and for the end-to-end run: `BUGS_BOT_HOME`, `BUGS_BOT_ENV_FILE`,
-`BUGS_BOT_CLAUDE_DIR`, `BUGS_BOT_LAUNCHER_DIR`, `BUGS_BOT_GAUGE`, `BUGS_BOT_API_ROOT` (a fake Bot
+`BUGS_BOT_CLAUDE_DIR`, `BUGS_BOT_LAUNCHER_DIR`, `BUGS_BOT_API_ROOT` (a fake Bot
 API; production never sets it).
 
 ## Migrating from the single-project skill
