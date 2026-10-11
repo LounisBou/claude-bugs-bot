@@ -16,7 +16,7 @@ on one machine.
 | `/bugs-bot:init` | Binds the repository to its Telegram group or Slack channel (one per project): asks a few questions, finds the group among the bot's pending updates (or in Pull's log of dropped chats) or among the Slack channels the app is in, writes `.bugs-bot.json` (kept out of git through `.git/info/exclude`) and registers the project. Re-run: updates, never duplicates. |
 | `/bugs-bot:start` | Launches the project's agent in a tab right of your session, which becomes its launcher. Needs the orchestrator plugin. |
 | `/bugs-bot:remove` | Unregisters the project: Pull stops routing its group. Its data and project file are kept. |
-| `/bugs-bot:doctor` | Installs the fixed `~/.local/bin/bugs-bot` launcher and checks the machine: python3, each registered channel's token (and that its platform accepts it), registry, Pull running exactly once, the orchestrator plugin, the allow rule. |
+| `/bugs-bot:doctor` | Installs the fixed `~/.local/bin/bugs-bot` launcher and checks the machine: python3, each registered channel's token (and that its platform accepts it), registry, Pull running exactly once, the orchestrator plugin at 0.49 or later, the allow rule. |
 | skill `bugs-bot` | The protocol for launchers (what the agent says, and the words that answer it) and for the agent (talking to a reporter, the voice). |
 | `agent/AGENT.md` | The agent's instructions. They name no project: its facts come in the startup prompt, from the project file. |
 

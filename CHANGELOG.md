@@ -15,6 +15,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and its `gate_tokens=` / `context_tokens=` / `context_window=` / `handover=` line are
   unchanged; a partial, empty or absent file is one error line, exit 1. The plugin
   dependency now requires orchestrator `>=0.49`, the release whose module writes the file.
+- `doctor`'s `orchestrator` check reads the active install from the host's
+  `plugins/installed_plugins.json` and fails below 0.49. It no longer takes the last directory
+  of the plugin cache, which keeps every version side by side.
 
 ## 0.1.5 — 2026-10-05
 
