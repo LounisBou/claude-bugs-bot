@@ -2,7 +2,7 @@
 # bugs-bot setup: find a Python 3.10 or newer, install one only when none is found, and remember it.
 #
 #   sh <plugin>/bin/setup                 find, remember, print the interpreter's path on the last line
-#   sh <plugin>/bin/setup doctor ...      the same, then run `bugs-bot doctor ...` through it
+#   sh <plugin>/bin/setup install         the same, then run `bugs-bot install` through it (/bugs-bot:install)
 #
 # The interpreter is remembered in ~/.bugs-bot/python (BUGS_BOT_HOME moves it): the fixed launcher reads
 # it at every start, so PM2's Pull and every session run it. BUGS_BOT_PYTHON, when set, still wins.

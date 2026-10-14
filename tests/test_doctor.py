@@ -151,12 +151,7 @@ def test_pull_fails_when_pm2_recorded_a_versioned_path(machine_env):
 
     assert not check.ok
     assert f"PM2 recorded a versioned path for bugs-bot-pull: {VERSIONED}" in check.detail
-    for step in (
-        "bugs-bot doctor --install-launcher",
-        "pm2 delete bugs-bot-pull",
-        "pm2 start <plugin>/pm2.config.js && pm2 save",
-    ):
-        assert step in check.detail
+    assert "run /bugs-bot:install" in check.detail
 
 
 def test_pull_passes_when_pm2_recorded_an_unrelated_path_under_a_cache(machine_env):
@@ -225,8 +220,7 @@ def test_pull_fails_when_pm2_recorded_a_working_directory_other_than_home(machin
     assert not check.ok
     assert f"PM2 recorded the working directory {CHECKOUT} for bugs-bot-pull" in check.detail
     assert "versioned path" not in check.detail
-    assert "cd ~ && pm2 delete bugs-bot-pull" in check.detail
-    assert "pm2 start <plugin>/pm2.config.js && pm2 save" in check.detail
+    assert "run /bugs-bot:install" in check.detail
 
 
 def test_pull_passes_when_pm2_recorded_the_home_directory_as_working_directory(machine_env, fake_home):
@@ -247,10 +241,7 @@ def test_pull_names_both_when_the_path_and_the_working_directory_are_wrong(machi
     assert not check.ok
     assert f"versioned path for bugs-bot-pull: {VERSIONED}" in check.detail
     assert f"working directory {CHECKOUT}" in check.detail
-    assert check.detail.count("pm2 delete bugs-bot-pull") == 1
-    assert check.detail.count("pm2 start") == 1
-    assert check.detail.index("bugs-bot doctor --install-launcher") < check.detail.index("pm2 delete")
-    assert "cd ~ && pm2 delete bugs-bot-pull" in check.detail
+    assert check.detail.count("/bugs-bot:install") == 1
 
 
 def test_pull_two_processes_keep_their_verdict_whatever_working_directory_pm2_recorded(machine_env, fake_home):
@@ -346,7 +337,7 @@ def test_launcher_check_fails_when_absent_or_different(machine_env, tmp_path):
 
     launcher.unlink()
     check = by_name(run_checks(machine_env, PULL_PS))["launcher"]
-    assert not check.ok and "--install-launcher" in check.detail
+    assert not check.ok and "run /bugs-bot:install" in check.detail
 
 
 def test_launcher_check_fails_when_not_executable(machine_env, tmp_path):
@@ -419,8 +410,8 @@ def pin_mtimes(claude: Path) -> None:
     ],
     ids=["no-file", "rule-missing-from-both", "one-unreadable", "unreadable-and-missing"],
 )
-@pytest.mark.parametrize("argv", [["doctor"], ["doctor", "--install-launcher"]], ids=["check", "install"])
-def test_doctor_never_writes_a_settings_file_when_the_rule_is_missing(machine_env, ps, tmp_path, files, argv):
+@pytest.mark.parametrize("argv", [["doctor"], ["install"]], ids=["check", "install"])
+def test_doctor_never_writes_a_settings_file_when_the_rule_is_missing(machine_env, ps, tmp_path, files, argv, fake_pm2):
     claude = tmp_path / "claude"
     (claude / "settings.json").unlink()
     for name, content in files.items():
@@ -443,8 +434,8 @@ def test_doctor_never_writes_a_settings_file_when_the_rule_is_missing(machine_en
     ],
     ids=["binary", "no-equal", "other-variable"],
 )
-@pytest.mark.parametrize("argv", [["doctor"], ["doctor", "--install-launcher"]], ids=["check", "install"])
-def test_doctor_never_prints_the_token_of_a_broken_env_file(machine_env, ps, tmp_path, capsys, content, argv):
+def test_doctor_never_prints_the_token_of_a_broken_env_file(machine_env, ps, tmp_path, capsys, content):
+    argv = ["doctor"]
     broken = tmp_path / "broken.env"
     broken.write_bytes(content)
     machine_env["BUGS_BOT_ENV_FILE"] = str(broken)
@@ -499,14 +490,19 @@ def test_cli_doctor_exits_1_and_names_the_failures(machine_env, ps, capsys, tmp_
     assert code == 1 and "FAIL" in out and "/permissions → Allow → Bash(bugs-bot:*)" in out
 
 
-def test_cli_doctor_install_launcher_writes_it_first(machine_env, ps, tmp_path, capsys):
+def test_cli_doctor_changes_nothing_and_points_to_install(machine_env, ps, tmp_path, capsys):
     (tmp_path / "localbin" / "bugs-bot").unlink()
 
-    code = cli.main(["doctor", "--install-launcher"], env=machine_env)
+    code = cli.main(["doctor"], env=machine_env)
 
-    assert code == 0
-    assert (tmp_path / "localbin" / "bugs-bot").read_text() == LAUNCHER_TEXT
-    assert str(tmp_path / "localbin" / "bugs-bot") in capsys.readouterr().out
+    assert code == 1
+    assert not (tmp_path / "localbin" / "bugs-bot").exists()
+    assert "missing: run /bugs-bot:install" in capsys.readouterr().out
+
+
+def test_doctor_no_longer_takes_install_launcher(machine_env, ps):
+    with pytest.raises(SystemExit):
+        cli.main(["doctor", "--install-launcher"], env=machine_env)
 
 
 def test_cli_doctor_runs_outside_any_project(machine_env, ps, tmp_path, monkeypatch):
@@ -548,7 +544,7 @@ def test_interpreter_fails_when_none_is_remembered_and_names_the_setup(machine_e
     check = by_name(run_checks(machine_env, PULL_PS))["interpreter"]
 
     assert not check.ok
-    assert "none remembered" in check.detail and "sh <plugin>/bin/setup doctor --install-launcher" in check.detail
+    assert "none remembered" in check.detail and "run /bugs-bot:install" in check.detail
 
 
 def test_interpreter_fails_when_the_remembered_one_is_gone(machine_env, tmp_path):

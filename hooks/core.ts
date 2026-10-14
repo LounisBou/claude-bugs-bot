@@ -139,8 +139,8 @@ export const TOOL = 'mcp__bugs-bot__bugs'
 
 /*
  * The CLI commands the tool runs. `wait` is not one: it blocks up to 55 minutes
- * and stays a background Bash call. `pull`, `init`, `remove` and `doctor` are the
- * operator's and the machine's, never an agent's.
+ * and stays a background Bash call. `pull`, `init`, `remove`, `doctor`, `install`
+ * and `token` are the operator's and the machine's, never an agent's.
  */
 export const TOOL_COMMANDS = [
   'list', 'show', 'reply', 'edit', 'delete', 'fixed', 'taken', 'done', 'triage',

@@ -191,10 +191,10 @@ def test_a_bugs_bot_python_that_is_too_old_is_refused_by_name(machine):
 def test_with_arguments_it_runs_this_plugins_cli_through_the_chosen_interpreter(machine):
     chosen = fake_python(machine["bin"] / "python3.12", suitable=True)
 
-    result = setup(machine, "doctor", "--install-launcher")
+    result = setup(machine, "install")
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == f"ran {chosen} {REPO_ROOT}/bin/bugs-bot doctor --install-launcher"
+    assert result.stdout.strip() == f"ran {chosen} {REPO_ROOT}/bin/bugs-bot install"
 
 
 def test_with_a_real_interpreter_the_remembered_path_is_its_own_executable(machine):

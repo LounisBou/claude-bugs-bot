@@ -23,7 +23,8 @@ from bugs_bot.store import Machine, bugs_home
 MIN_PYTHON = (3, 10)
 # Where ``bin/setup`` remembers the interpreter it found or installed, in the bugs home.
 PYTHON_FILE = "python"
-SETUP_LINE = "`sh <plugin>/bin/setup doctor --install-launcher` (/bugs-bot:doctor does)"
+# What sets the machine up, once: Python, the launcher, the single Pull under PM2.
+INSTALL_LINE = "/bugs-bot:install"
 ALLOW_RULE = "Bash(bugs-bot:*)"
 PERMISSIONS_LINE = f"/permissions → Allow → {ALLOW_RULE}"
 SETTINGS_FILES = ("settings.json", "settings.local.json")
@@ -41,7 +42,9 @@ VERSIONED_DIR = "/plugins/cache/lounisbou/bugs-bot/"
 # one run silently. ``sort -V`` orders 0.10.0 after 0.2.0 (BSD sort on macOS has it).
 # The interpreter: ``BUGS_BOT_PYTHON`` when set (a pyenv binary, not its shim), else the one ``bin/setup``
 # remembered in ``~/.bugs-bot/python``, else ``python3``. Read at every start, so PM2's Pull runs it too.
-LAUNCHER_MARKER = "# bugs-bot launcher: installed by `bugs-bot doctor --install-launcher`"
+LAUNCHER_MARKER = "# bugs-bot launcher: installed by /bugs-bot:install"
+# What every launcher ever installed starts with, the older ones included: what makes a file replaceable.
+LAUNCHER_PREFIX = "# bugs-bot launcher: installed by "
 LAUNCHER_TEXT = "#!/bin/sh\n" + LAUNCHER_MARKER + """
 c="${BUGS_BOT_CLAUDE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
 p="${BUGS_BOT_PYTHON:-}"
@@ -100,7 +103,7 @@ def install_launcher(target_dir: Path) -> Path:
             current = path.read_text()
         except (OSError, ValueError):
             current = ""
-        if LAUNCHER_MARKER not in current:
+        if LAUNCHER_PREFIX not in current:
             raise BugsError(f"{path} exists and is not a bugs-bot launcher: move it away, then install again")
     fd, tmp = tempfile.mkstemp(dir=target_dir, prefix=".bugs-bot.")
     try:
@@ -138,9 +141,9 @@ def _interpreter(env: Mapping[str, str]) -> Check:
     except (OSError, ValueError):
         remembered = ""
     if not remembered:
-        return Check("interpreter", False, f"none remembered in {path}: run {SETUP_LINE}")
+        return Check("interpreter", False, f"none remembered in {path}: run {INSTALL_LINE}")
     if not os.access(remembered, os.X_OK):
-        return Check("interpreter", False, f"{remembered}, remembered in {path}, is gone: run {SETUP_LINE}")
+        return Check("interpreter", False, f"{remembered}, remembered in {path}, is gone: run {INSTALL_LINE}")
     return Check("interpreter", True, f"{remembered} (remembered in {path})")
 
 
@@ -161,7 +164,7 @@ def _token(env: Mapping[str, str], kind: str) -> Check:
     name = "token" if kind == DEFAULT_CHANNEL else f"{kind} token"
     problem = token_problem(kind, env)
     if problem is not None:
-        return Check(name, False, problem)
+        return Check(name, False, f"{problem}: /bugs-bot:init asks for it (`bugs-bot token --channel {kind} --set`)")
     return Check(name, True, "present")
 
 
@@ -216,31 +219,29 @@ def _pull(ps_output: str | BugsError, pm2_jlist: str | None = None) -> Check:
         versioned = isinstance(script, str) and VERSIONED_DIR in Path(script).as_posix()
         # A working directory other than the home directory is a throwaway shell's: deleting it breaks the next restart.
         unstable = isinstance(cwd, str) and Path(cwd) != Path.home()
-        restart = "`pm2 start <plugin>/pm2.config.js && pm2 save`"
+        fix = f"run {INSTALL_LINE}: it replaces it by one on the launcher, from the home directory"
         if versioned and unstable:
             return Check(
                 "pull",
                 False,
-                f"PM2 recorded a versioned path for {PULL_APP}: {script}, and the working directory {cwd}; "
-                f"run `bugs-bot doctor --install-launcher`, `cd ~ && pm2 delete {PULL_APP}`, then {restart}",
+                f"PM2 recorded a versioned path for {PULL_APP}: {script}, and the working directory {cwd}; {fix}",
             )
         if versioned:
             return Check(
                 "pull",
                 False,
-                f"PM2 recorded a versioned path for {PULL_APP}: {script}; run `bugs-bot doctor --install-launcher`, "
-                f"`pm2 delete {PULL_APP}`, then {restart}",
+                f"PM2 recorded a versioned path for {PULL_APP}: {script}; {fix}",
             )
         if unstable:
             return Check(
                 "pull",
                 False,
-                f"PM2 recorded the working directory {cwd} for {PULL_APP}; run `cd ~ && pm2 delete {PULL_APP}`, then {restart}",
+                f"PM2 recorded the working directory {cwd} for {PULL_APP}; {fix}",
             )
     if len(pids) == 1:
         return Check("pull", True, f"running (pid {pids[0]})")
     if not pids:
-        return Check("pull", False, "not running: start it with PM2 (bugs-bot-pull)")
+        return Check("pull", False, f"not running: run {INSTALL_LINE}, which starts it under PM2 ({PULL_APP})")
     return Check("pull", False, f"{len(pids)} processes (pids {', '.join(map(str, pids))}): two pollers steal each other's messages")
 
 
@@ -288,11 +289,11 @@ def _orchestrator(claude: Path) -> Check:
 def _launcher(directory: Path) -> Check:
     path = directory / "bugs-bot"
     if not path.is_file():
-        return Check("launcher", False, f"{path} missing: run `doctor --install-launcher`")
+        return Check("launcher", False, f"{path} missing: run {INSTALL_LINE}")
     if path.read_text() != LAUNCHER_TEXT:
-        return Check("launcher", False, f"{path} differs from the current launcher: run `doctor --install-launcher`")
+        return Check("launcher", False, f"{path} differs from the current launcher: run {INSTALL_LINE}")
     if not os.access(path, os.X_OK):
-        return Check("launcher", False, f"{path} is not executable: run `doctor --install-launcher`")
+        return Check("launcher", False, f"{path} is not executable: run {INSTALL_LINE}")
     return Check("launcher", True, str(path))
 
 
@@ -348,21 +349,17 @@ def run_checks(
 def cmd_doctor(
     env: Mapping[str, str],
     ps_output: str | BugsError,
-    install: bool,
     transport: Transport | None = None,
     pm2_jlist: str | None = None,
 ) -> int:
-    """Print one line per check; return 0 only when all pass.
+    """Print one line per check; return 0 only when all pass. Nothing is changed: ``install`` sets things up.
 
     Args:
         env: Environment.
         ps_output: The process table, as ``run_checks`` takes it.
-        install: Install the launcher first (the first run, when it does not exist yet).
         transport: To ask each platform with a registered project who the bot is.
         pm2_jlist: PM2's process list, as ``run_checks`` takes it.
     """
-    if install:
-        print(f"installed {install_launcher(_launcher_dir(env))}")
     checks = run_checks(env, ps_output, transport, pm2_jlist)
     for check in checks:
         print(f"{'ok  ' if check.ok else 'FAIL'}  {check.name}: {check.detail}")

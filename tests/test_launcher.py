@@ -274,5 +274,5 @@ def test_the_cli_on_a_python_older_than_3_10_says_to_run_doctor_instead_of_crash
     result = subprocess.run([sys.executable, "-c", code, "list"], capture_output=True, text=True, check=False)
 
     assert result.returncode == 1
-    assert "Python 3.10 or newer is needed" in result.stderr and "is 3.9: run /bugs-bot:doctor" in result.stderr
+    assert "Python 3.10 or newer is needed" in result.stderr and "is 3.9: run /bugs-bot:install" in result.stderr
     assert "Traceback" not in result.stderr
