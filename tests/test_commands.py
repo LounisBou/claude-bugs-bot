@@ -10,8 +10,9 @@ import pytest
 from conftest import REPO_ROOT
 
 COMMANDS = sorted((REPO_ROOT / "commands").glob("*.md"))
-# The one invocation that is not `bugs-bot ...`: the first doctor run, before the launcher exists.
-BOOTSTRAP = "python3 ${CLAUDE_PLUGIN_ROOT}/bin/bugs-bot doctor"
+# The one invocation that is not `bugs-bot ...`: the first doctor run, before the launcher and a suitable
+# interpreter exist; the setup finds or installs one, then runs doctor through it.
+BOOTSTRAP = "sh ${CLAUDE_PLUGIN_ROOT}/bin/setup doctor"
 BOOTSTRAP_RULE = f"{BOOTSTRAP}:*"
 # start's one other: the iTerm launcher written out in full.
 ITERM_LAUNCHER = "$SCRIPT "

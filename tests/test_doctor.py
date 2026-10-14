@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,8 @@ def machine_env(tmp_path: Path, env: dict[str, str]) -> dict[str, str]:
     install_orchestrator(claude, "0.49.0")
     claude.joinpath("settings.json").write_text(json.dumps({"permissions": {"allow": [ALLOW]}}))
     install_launcher(tmp_path / "localbin")
+    Path(env["BUGS_BOT_HOME"]).mkdir(parents=True, exist_ok=True)
+    Path(env["BUGS_BOT_HOME"], "python").write_text(f"{sys.executable}\n")
     return {**env, "BUGS_BOT_CLAUDE_DIR": str(claude), "BUGS_BOT_LAUNCHER_DIR": str(tmp_path / "localbin")}
 
 
@@ -42,7 +45,7 @@ def test_a_healthy_machine_passes_every_check(machine_env):
     checks = run_checks(machine_env, PULL_PS)
 
     assert [c.name for c in checks if not c.ok] == []
-    assert len(checks) == 7
+    assert len(checks) == 8
 
 
 # -- pull_processes -------------------------------------------------------------
@@ -151,7 +154,7 @@ def test_pull_fails_when_pm2_recorded_a_versioned_path(machine_env):
     for step in (
         "bugs-bot doctor --install-launcher",
         "pm2 delete bugs-bot-pull",
-        "BUGS_BOT_PYTHON=<python 3.10+> pm2 start <plugin>/pm2.config.js && pm2 save",
+        "pm2 start <plugin>/pm2.config.js && pm2 save",
     ):
         assert step in check.detail
 
@@ -223,7 +226,7 @@ def test_pull_fails_when_pm2_recorded_a_working_directory_other_than_home(machin
     assert f"PM2 recorded the working directory {CHECKOUT} for bugs-bot-pull" in check.detail
     assert "versioned path" not in check.detail
     assert "cd ~ && pm2 delete bugs-bot-pull" in check.detail
-    assert "BUGS_BOT_PYTHON=<python 3.10+> pm2 start <plugin>/pm2.config.js && pm2 save" in check.detail
+    assert "pm2 start <plugin>/pm2.config.js && pm2 save" in check.detail
 
 
 def test_pull_passes_when_pm2_recorded_the_home_directory_as_working_directory(machine_env, fake_home):
@@ -524,10 +527,42 @@ def test_cli_doctor_reports_an_unreadable_process_table_as_a_failed_check(machin
     out = capsys.readouterr().out
     assert code == 1
     assert "FAIL  pull: cannot read the process table: boom" in out
-    assert out.count("ok  ") == 6  # every other check still ran
+    assert out.count("ok  ") == 7  # every other check still ran
 
 
 def test_run_checks_takes_the_error_of_a_failed_ps(machine_env):
     check = by_name(run_checks(machine_env, BugsError("cannot read the process table: boom")))["pull"]
 
     assert not check.ok and "boom" in check.detail
+
+
+def test_interpreter_passes_with_the_one_setup_remembered(machine_env):
+    check = by_name(run_checks(machine_env, PULL_PS))["interpreter"]
+
+    assert check.ok and sys.executable in check.detail
+
+
+def test_interpreter_fails_when_none_is_remembered_and_names_the_setup(machine_env):
+    Path(machine_env["BUGS_BOT_HOME"], "python").unlink()
+
+    check = by_name(run_checks(machine_env, PULL_PS))["interpreter"]
+
+    assert not check.ok
+    assert "none remembered" in check.detail and "sh <plugin>/bin/setup doctor --install-launcher" in check.detail
+
+
+def test_interpreter_fails_when_the_remembered_one_is_gone(machine_env, tmp_path):
+    gone = tmp_path / "uninstalled" / "python3.12"
+    Path(machine_env["BUGS_BOT_HOME"], "python").write_text(f"{gone}\n")
+
+    check = by_name(run_checks(machine_env, PULL_PS))["interpreter"]
+
+    assert not check.ok and f"{gone}, remembered in" in check.detail and "is gone" in check.detail
+
+
+def test_interpreter_passes_with_bugs_bot_python_set(machine_env):
+    Path(machine_env["BUGS_BOT_HOME"], "python").unlink()
+
+    check = by_name(run_checks({**machine_env, "BUGS_BOT_PYTHON": "/opt/py/bin/python3"}, PULL_PS))["interpreter"]
+
+    assert check.ok and check.detail == "BUGS_BOT_PYTHON=/opt/py/bin/python3"

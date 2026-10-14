@@ -21,6 +21,9 @@ from bugs_bot.project import DEFAULT_CHANNEL
 from bugs_bot.store import Machine, bugs_home
 
 MIN_PYTHON = (3, 10)
+# Where ``bin/setup`` remembers the interpreter it found or installed, in the bugs home.
+PYTHON_FILE = "python"
+SETUP_LINE = "`sh <plugin>/bin/setup doctor --install-launcher` (/bugs-bot:doctor does)"
 ALLOW_RULE = "Bash(bugs-bot:*)"
 PERMISSIONS_LINE = f"/permissions → Allow → {ALLOW_RULE}"
 SETTINGS_FILES = ("settings.json", "settings.local.json")
@@ -36,14 +39,18 @@ VERSIONED_DIR = "/plugins/cache/lounisbou/bugs-bot/"
 # (``installed_plugins.json``) names; only without a usable record, the newest cached directory. The directory is
 # chosen first and only then checked for its CLI, so a half-removed version is refused instead of letting an older
 # one run silently. ``sort -V`` orders 0.10.0 after 0.2.0 (BSD sort on macOS has it).
-# ``BUGS_BOT_PYTHON`` picks the interpreter (a pyenv binary, not its shim), as PM2 passes it through its ``env``.
+# The interpreter: ``BUGS_BOT_PYTHON`` when set (a pyenv binary, not its shim), else the one ``bin/setup``
+# remembered in ``~/.bugs-bot/python``, else ``python3``. Read at every start, so PM2's Pull runs it too.
 LAUNCHER_MARKER = "# bugs-bot launcher: installed by `bugs-bot doctor --install-launcher`"
 LAUNCHER_TEXT = "#!/bin/sh\n" + LAUNCHER_MARKER + """
 c="${BUGS_BOT_CLAUDE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
-d=$("${BUGS_BOT_PYTHON:-python3}" -c 'import json,sys;print(json.load(open(sys.argv[1]))["plugins"]["bugs-bot@lounisbou"][0]["installPath"])' "$c/plugins/installed_plugins.json" 2>/dev/null)
+p="${BUGS_BOT_PYTHON:-}"
+[ -n "$p" ] || { read -r p < "${BUGS_BOT_HOME:-$HOME/.bugs-bot}/python"; } 2>/dev/null
+p="${p:-python3}"
+d=$("$p" -c 'import json,sys;print(json.load(open(sys.argv[1]))["plugins"]["bugs-bot@lounisbou"][0]["installPath"])' "$c/plugins/installed_plugins.json" 2>/dev/null)
 [ -n "$d" ] && [ -f "$d/bin/bugs-bot" ] || d=$(ls -d "$c"/plugins/cache/lounisbou/bugs-bot/*/ 2>/dev/null | sort -V | tail -1); d=${d%/}
 [ -n "$d" ] && [ -f "$d/bin/bugs-bot" ] || { echo "bugs-bot: no installed version found — run /bugs-bot:doctor" >&2; exit 127; }
-exec "${BUGS_BOT_PYTHON:-python3}" "$d/bin/bugs-bot" "$@"
+exec "$p" "$d/bin/bugs-bot" "$@"
 """
 
 
@@ -120,6 +127,23 @@ def _python() -> Check:
     return Check("python", tuple(sys.version_info[:2]) >= MIN_PYTHON, f"{version} (needs {'.'.join(map(str, MIN_PYTHON))}+)")
 
 
+def _interpreter(env: Mapping[str, str]) -> Check:
+    """The interpreter the launcher runs: ``BUGS_BOT_PYTHON``, else the one ``bin/setup`` remembered."""
+    chosen = env.get("BUGS_BOT_PYTHON")
+    if chosen:
+        return Check("interpreter", True, f"BUGS_BOT_PYTHON={chosen}")
+    path = bugs_home(env) / PYTHON_FILE
+    try:
+        remembered = path.read_text().strip()
+    except (OSError, ValueError):
+        remembered = ""
+    if not remembered:
+        return Check("interpreter", False, f"none remembered in {path}: run {SETUP_LINE}")
+    if not os.access(remembered, os.X_OK):
+        return Check("interpreter", False, f"{remembered}, remembered in {path}, is gone: run {SETUP_LINE}")
+    return Check("interpreter", True, f"{remembered} (remembered in {path})")
+
+
 def _entries(env: Mapping[str, str]) -> dict:
     try:
         return Machine(bugs_home(env)).registry.entries()
@@ -192,7 +216,7 @@ def _pull(ps_output: str | BugsError, pm2_jlist: str | None = None) -> Check:
         versioned = isinstance(script, str) and VERSIONED_DIR in Path(script).as_posix()
         # A working directory other than the home directory is a throwaway shell's: deleting it breaks the next restart.
         unstable = isinstance(cwd, str) and Path(cwd) != Path.home()
-        restart = "`BUGS_BOT_PYTHON=<python 3.10+> pm2 start <plugin>/pm2.config.js && pm2 save`"
+        restart = "`pm2 start <plugin>/pm2.config.js && pm2 save`"
         if versioned and unstable:
             return Check(
                 "pull",
@@ -311,6 +335,7 @@ def run_checks(
             tokens.append(_bot(env, kind, transport))
     return [
         _python(),
+        _interpreter(env),
         *tokens,
         _registry(env),
         _pull(ps_output, pm2_jlist),

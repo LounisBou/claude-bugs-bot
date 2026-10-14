@@ -16,7 +16,7 @@ on one machine.
 | `/bugs-bot:init` | Binds the repository to its Telegram group or Slack channel (one per project): asks a few questions, finds the group among the bot's pending updates (or in Pull's log of dropped chats) or among the Slack channels the app is in, writes `.bugs-bot.json` (kept out of git through `.git/info/exclude`) and registers the project. Re-run: updates, never duplicates. |
 | `/bugs-bot:start` | Launches the project's agent in a tab right of your session, which becomes its launcher. Needs the orchestrator plugin. |
 | `/bugs-bot:remove` | Unregisters the project: Pull stops routing its group. Its data and project file are kept. |
-| `/bugs-bot:doctor` | Installs the fixed `~/.local/bin/bugs-bot` launcher and checks the machine: python3, each registered channel's token (and that its platform accepts it), registry, Pull running exactly once, the orchestrator plugin at 0.49 or later, the allow rule. |
+| `/bugs-bot:doctor` | Finds a Python 3.10 or newer on the machine (installs one with `uv` only when there is none) and remembers it, installs the fixed `~/.local/bin/bugs-bot` launcher and checks the machine: the Python and the remembered interpreter, each registered channel's token (and that its platform accepts it), registry, Pull running exactly once, the orchestrator plugin at 0.49 or later, the allow rule. |
 | hooks module | Where the host loads plugin modules: `/bugs-bot:start` runs its steps itself, with no model turn; the `bugs` tool (`mcp__bugs-bot__bugs`) runs the CLI with its arguments as a list, no shell quoting, and measures `gate --measure` from the session itself; a guard refuses a group post naming a PR, a commit, a branch, a local path or a host other than the deployment URL, and any read of the token file. Where modules do not load (`claude -p`, an older host), the markdown command, the shell form and the orchestrator's measure file do the same work. |
 | skill `bugs-bot` | The protocol for launchers (what the agent says, and the words that answer it) and for the agent (talking to a reporter, the voice). |
 | `agent/AGENT.md` | The agent's instructions. They name no project: its facts come in the startup prompt, from the project file. |
@@ -50,8 +50,20 @@ pm2 start <plugin directory>/pm2.config.js && pm2 save
 Without the launcher, `pm2 start` answers « Script not found » and registers nothing; `bugs-bot doctor`'s
 `launcher` check names it.
 
-The launcher runs `python3` from PM2's `PATH`; set `BUGS_BOT_PYTHON` to an interpreter (3.10 or newer,
-the pyenv binary itself rather than its shim) before the `pm2 start` to choose another.
+The launcher runs the interpreter `/bugs-bot:doctor` remembered in `~/.bugs-bot/python`, read at every
+start, so PM2's Pull runs it too. `BUGS_BOT_PYTHON`, set before the `pm2 start`, still wins (the pyenv
+binary itself rather than its shim).
+
+## Python
+
+bugs-bot needs Python 3.10 or newer and the standard library only: no virtual environment. On its first
+run `/bugs-bot:doctor` runs `sh <plugin>/bin/setup`, which looks for one already on the machine, in this
+order: `BUGS_BOT_PYTHON`, the one remembered before, `python3.14` … `python3.10` and `python3` on the
+`PATH`, pyenv's versions, Homebrew's prefixes, `uv python find '>=3.10'`. Only when none is found does it
+install `uv` (its standalone installer, into `~/.local/bin`, no root, no shell profile edited) and then
+Python 3.12 with `uv python install 3.12`. The interpreter it found or installed is remembered in
+`~/.bugs-bot/python`; the launcher, PM2's Pull and the hooks module run it. The system Python is never
+changed. Run on an older Python, the CLI says to run `/bugs-bot:doctor` instead of failing at start.
 
 ## Setting up Telegram (the operator, once)
 
@@ -86,7 +98,7 @@ Telegram's held request is cut to 10 s, so both are read in the same process. HT
 
 ## Requirements
 
-- `python3` 3.10 or newer; the standard library only.
+- Python 3.10 or newer (found or installed by `/bugs-bot:doctor`, see [Python](#python)); the standard library only.
 - PM2, for Pull.
 - for `/bugs-bot:start` and the agent's handover: the `orchestrator` plugin (its iTerm launcher
   and the hooks module that measures the agent's context), on macOS with iTerm2.

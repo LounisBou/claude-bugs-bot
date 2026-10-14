@@ -5,6 +5,30 @@ All notable changes are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.0 — 2026-10-14
+
+### Added
+
+- `bin/setup`: finds a Python 3.10 or newer already on the machine (`BUGS_BOT_PYTHON`, the one remembered
+  before, `python3.14` … `python3.10` and `python3` on the `PATH`, pyenv's versions, Homebrew's prefixes,
+  `uv python find`) and remembers it in `~/.bugs-bot/python`. Only when none is found does it install `uv`
+  with its standalone installer into `~/.local/bin` (no root, no shell profile edited), then
+  `uv python install 3.12`. The system Python is never changed; no virtual environment.
+- `doctor`'s `interpreter` check: the remembered interpreter (or `BUGS_BOT_PYTHON`) exists.
+
+### Changed
+
+- `/bugs-bot:doctor`'s first run is `sh <plugin>/bin/setup doctor --install-launcher`: it no longer
+  runs the CLI with whatever `python3` the `PATH` holds.
+- The fixed launcher, and through it PM2's Pull, runs the remembered interpreter when `BUGS_BOT_PYTHON`
+  is not set; so do `/bugs-bot:start` and the `bugs` tool. `doctor`'s PM2 remedy no longer asks for
+  `BUGS_BOT_PYTHON`.
+
+### Fixed
+
+- On a new machine whose `python3` is older than 3.10, bugs-bot failed at start. The CLI now says that
+  Python 3.10 or newer is needed and to run `/bugs-bot:doctor`, which finds or installs one.
+
 ## 0.3.0 — 2026-10-12
 
 ### Added

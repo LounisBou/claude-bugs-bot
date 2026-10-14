@@ -157,6 +157,19 @@ export const READS = new Set(['list', 'show', 'pending', 'overdue', 'person', 'p
 // CLI's own run is bounded by the image uploads and the deploy check.
 export const TOOL_TIMEOUT_MS = 300_000
 
+/*
+ * Where bin/setup remembers the interpreter it found or installed: `python` in the bugs home
+ * (`BUGS_BOT_HOME`, else `~/.bugs-bot`), as the fixed launcher reads it.
+ */
+export function pythonFile(bugsHome: string | undefined, home: string): string {
+  return `${(bugsHome || `${home}/.bugs-bot`).replace(/\/+$/, '')}/python`
+}
+
+// The remembered interpreter, its file's first line; none (or an empty file) leaves python3.
+export function chosenPython(remembered: string | null): string {
+  return (remembered ?? '').split('\n')[0].trim() || 'python3'
+}
+
 export function toolArgv(python: string, root: string, command: string, args: readonly string[]): string[] {
   return [python, `${root.replace(/\/+$/, '')}/bin/bugs-bot`, command, ...args]
 }

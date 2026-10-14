@@ -22,8 +22,10 @@ module.exports = {
     interpreter: 'none',
     // PM2 otherwise records the directory of the shell that ran `pm2 start`, which may be deleted later.
     cwd: os.homedir(),
-    // Set BUGS_BOT_PYTHON to a pyenv interpreter itself, not its shim: the shim needs a shell
-    // environment PM2 lacks. The launcher runs it; without it, the python3 found on PM2's PATH (3.10 or newer).
+    // The launcher runs the interpreter `/bugs-bot:doctor` remembered in ~/.bugs-bot/python (found on
+    // the machine, or installed with uv when none was), read at each start: no PM2 env is needed for it.
+    // BUGS_BOT_PYTHON, when set at `pm2 start`, still wins: a pyenv interpreter itself, not its shim
+    // (the shim needs a shell environment PM2 lacks).
     env: process.env.BUGS_BOT_PYTHON ? { BUGS_BOT_PYTHON: process.env.BUGS_BOT_PYTHON } : {},
     autorestart: true,
     // A loop that dies at start (a broken interpreter) must not spin: wait before each restart.
